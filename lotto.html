@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>로또 번호 생성기</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: linear-gradient(135deg, #1e2a4a, #0f1626);
+    color: #f5f5f7;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    padding: 40px 16px;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+    letter-spacing: 1px;
+  }
+  p.subtitle {
+    margin: 0 0 28px;
+    color: #a9b3cc;
+    font-size: 14px;
+  }
+  .controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    border: none;
+    border-radius: 999px;
+    padding: 12px 26px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  button:active { transform: scale(0.96); }
+  #drawBtn {
+    background: linear-gradient(135deg, #ffb703, #fb8500);
+    color: #1e1e1e;
+    box-shadow: 0 4px 14px rgba(251, 133, 0, 0.4);
+  }
+  #drawBtn:hover { box-shadow: 0 6px 18px rgba(251, 133, 0, 0.55); }
+  #multiBtn {
+    background: rgba(255,255,255,0.08);
+    color: #f5f5f7;
+    border: 1px solid rgba(255,255,255,0.25);
+  }
+  #multiBtn:hover { background: rgba(255,255,255,0.16); }
+  select {
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.08);
+    color: #f5f5f7;
+    padding: 12px 18px;
+    font-size: 15px;
+  }
+  #results {
+    width: 100%;
+    max-width: 560px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .game-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 14px 18px;
+    flex-wrap: wrap;
+    animation: pop 0.35s ease;
+  }
+  .game-label {
+    font-size: 13px;
+    color: #a9b3cc;
+    min-width: 44px;
+  }
+  .balls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ball {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 15px;
+    color: #1e1e1e;
+    box-shadow: inset 0 -4px 6px rgba(0,0,0,0.25), 0 2px 6px rgba(0,0,0,0.35);
+    animation: drop 0.4s ease;
+  }
+  .yellow { background: #fbc400; }
+  .blue   { background: #69c8f2; }
+  .red    { background: #ff7272; }
+  .gray   { background: #aaaaaa; color: #fff; }
+  .green  { background: #b0d840; }
+
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes drop {
+    from { opacity: 0; transform: scale(0.4) translateY(-10px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  footer {
+    margin-top: 36px;
+    font-size: 12px;
+    color: #6b7593;
+  }
+</style>
+</head>
+<body>
+
+<h1>🎱 로또 번호 생성기</h1>
+<p class="subtitle">1 ~ 45 중 중복 없는 번호 6개를 무작위로 뽑아드려요</p>
+
+<div class="controls">
+  <button id="drawBtn">번호 뽑기</button>
+  <select id="count">
+    <option value="1">1게임</option>
+    <option value="5" selected>5게임</option>
+    <option value="10">10게임</option>
+  </select>
+  <button id="multiBtn">한번에 뽑기</button>
+</div>
+
+<div id="results"></div>
+
+<footer>실제 로또 추첨 결과와 무관한 재미용 프로그램입니다.</footer>
+
+<script>
+  function ballColor(n) {
+    if (n <= 10) return "yellow";
+    if (n <= 20) return "blue";
+    if (n <= 30) return "red";
+    if (n <= 40) return "gray";
+    return "green";
+  }
+
+  function drawOneGame() {
+    const numbers = new Set();
+    while (numbers.size < 6) {
+      numbers.add(Math.floor(Math.random() * 45) + 1);
+    }
+    return [...numbers].sort((a, b) => a - b);
+  }
+
+  function renderGame(numbers, label) {
+    const row = document.createElement("div");
+    row.className = "game-row";
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "game-label";
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    const ballsEl = document.createElement("div");
+    ballsEl.className = "balls";
+    numbers.forEach(n => {
+      const ball = document.createElement("div");
+      ball.className = "ball " + ballColor(n);
+      ball.textContent = n;
+      ballsEl.appendChild(ball);
+    });
+    row.appendChild(ballsEl);
+
+    return row;
+  }
+
+  const resultsEl = document.getElementById("results");
+
+  document.getElementById("drawBtn").addEventListener("click", () => {
+    resultsEl.innerHTML = "";
+    resultsEl.appendChild(renderGame(drawOneGame(), "결과"));
+  });
+
+  document.getElementById("multiBtn").addEventListener("click", () => {
+    const count = parseInt(document.getElementById("count").value, 10);
+    resultsEl.innerHTML = "";
+    for (let i = 1; i <= count; i++) {
+      resultsEl.appendChild(renderGame(drawOneGame(), i + "번"));
+    }
+  });
+
+  document.getElementById("drawBtn").click();
+</script>
+
+</body>
+</html>
