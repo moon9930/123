@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.vercel/
+.DS_Store
+# 원본 공공데이터가 크거나 재배포 조건이 있으면 아래 줄의 주석을 푼다
+# data/*.csv
