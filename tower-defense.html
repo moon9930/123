@@ -1,0 +1,939 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>산성 방어</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+[hidden] { display: none !important; }
+body { margin: 0; }
+/* Layout: status bar on top, 16×10 battlefield canvas, then a dock with the four towers and the selection panel. Single look: dark lacquer frame with dancheong colours (red, blue-green, ochre). */
+:root {
+  --bg: #161a17;
+  --panel: #20261f;
+  --line: #333b31;
+  --ink: #eeeadf;
+  --muted: #9aa292;
+  --accent: #e2b33c;
+  --red: #c8432f;
+  --teal: #2f8a7f;
+  --grass: #4c6b3f;
+  --dirt: #a88a5c;
+  --stone: #6c6f68;
+
+  --e-inf: #e2dccb; --e-cav: #c98b4a; --e-hvy: #8a95a3; --e-boss: #9b2f2f;
+  --e-slime: #74c25e; --e-chariot: #8a6238;
+
+  --f-display: "Do Hyeon", "IBM Plex Sans KR", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  --f-num: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { min-height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+*, *::before, *::after { box-sizing: inherit; }
+.app { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; }
+h1 { font-family: var(--f-display); font-weight: 400; font-size: 2rem; margin: 0; line-height: 1; letter-spacing: .02em; }
+h1 span { color: var(--red); }
+.hud { display: flex; gap: 18px; flex-wrap: wrap; }
+.hud div { display: flex; flex-direction: column; }
+.hud .k { font-size: .68rem; letter-spacing: .12em; color: var(--muted); }
+.hud .v { font-family: var(--f-num); font-weight: 700; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.hud .gold .v { color: var(--accent); }
+.hud .lives .v { color: #ef8a78; }
+.ctrl { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  font: 600 .88rem var(--f-body); color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 14px; cursor: pointer;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--red); border-color: var(--red); color: #fff; }
+.btn.primary:disabled { background: var(--panel); border-color: var(--line); color: var(--muted); cursor: default; }
+.btn.on { border-color: var(--accent); color: var(--accent); }
+.btn:focus-visible, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.field {
+  position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10;
+  border-radius: 6px; overflow: hidden;
+  border: 3px solid var(--panel);
+  box-shadow: 0 0 0 1px var(--line), 0 16px 36px rgba(0,0,0,.4);
+  background: var(--grass);
+}
+#map { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.banner {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  background: rgba(22, 26, 23, .82); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 16px; font-size: .85rem; white-space: nowrap; pointer-events: none;
+  transition: opacity .25s;
+}
+.banner.big { font-family: var(--f-display); font-size: 1.5rem; color: var(--accent); padding: 8px 22px; }
+.overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  text-align: center; padding: 16px; background: rgba(16, 19, 17, .78);
+}
+.overlay h2 { font-family: var(--f-display); font-weight: 400; font-size: 2.4rem; margin: 0; }
+.overlay p { margin: 0; color: var(--muted); max-width: 36ch; line-height: 1.55; }
+
+.dock { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; align-items: stretch; }
+.shop { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.card {
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+  color: var(--ink); font: inherit; cursor: pointer; min-width: 0;
+}
+.card:hover { border-color: var(--muted); }
+.card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.card.poor { opacity: .5; }
+.card canvas { width: 36px; height: 36px; }
+.card .row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.card .nm { font-weight: 600; font-size: .95rem; }
+.card .key { margin-left: auto; font-family: var(--f-num); font-size: .7rem; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.card .cost { font-family: var(--f-num); color: var(--accent); font-size: .85rem; }
+.card .ds { font-size: .75rem; color: var(--muted); line-height: 1.35; }
+
+.info { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; font-size: .85rem; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.info h3 { margin: 0; font-family: var(--f-display); font-weight: 400; font-size: 1.3rem; }
+.info .muted { color: var(--muted); line-height: 1.5; margin: 0; }
+.info dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
+.info dt { color: var(--muted); }
+.info dd { margin: 0; font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.info dd i { font-style: normal; color: #8fd18a; }
+.info .warn { margin: 0; color: #ef8a78; font-weight: 600; }
+.info .acts { display: flex; gap: 8px; margin-top: auto; }
+.info .acts .btn { flex: 1; }
+
+.card .augs { font-size: .72rem; color: var(--accent); line-height: 1.35; }
+
+.aug {
+  position: fixed; inset: 0; z-index: 10; overflow-y: auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: rgba(12, 14, 12, .86);
+  padding-top: max(16px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.aug h2 { font-family: var(--f-display); font-weight: 400; font-size: 2.2rem; margin: 0; color: var(--accent); }
+.aug .sub { margin: 0; color: var(--muted); text-align: center; }
+.aug-list { display: grid; grid-template-columns: repeat(3, minmax(0, 230px)); gap: 12px; justify-content: center; width: 100%; }
+.aug-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px;
+  color: var(--ink); font: inherit; cursor: pointer; min-width: 0;
+  transition: transform .12s, border-color .12s;
+}
+.aug-card:hover { border-color: var(--accent); transform: translateY(-3px); }
+.aug-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.aug-card .top-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+.aug-card canvas { width: 44px; height: 44px; }
+.aug-card .tag { font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: #fff; }
+.aug-card .num { margin-left: auto; font-family: var(--f-num); font-size: .72rem; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; }
+.aug-card .an { font-family: var(--f-display); font-size: 1.45rem; }
+.aug-card .ad { font-size: .85rem; color: var(--muted); line-height: 1.45; }
+
+@media (max-width: 760px) {
+  .aug-list { grid-template-columns: minmax(0, 1fr); max-width: 360px; }
+  .aug-card .num { display: none; }
+  .dock { grid-template-columns: 1fr; }
+  .shop { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ctrl { margin-left: 0; width: 100%; }
+  .ctrl .btn { flex: 1; }
+  h1 { font-size: 1.6rem; }
+  .card .key { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .banner, .aug-card { transition: none; } .aug-card:hover { transform: none; } }
+</style>
+
+<main class="app">
+  <div class="top">
+    <h1>산성 <span>방어</span></h1>
+    <div class="hud">
+      <div class="gold"><span class="k">금</span><span class="v" id="gold">0</span></div>
+      <div class="lives"><span class="k">성벽</span><span class="v" id="lives">0</span></div>
+      <div><span class="k">웨이브</span><span class="v" id="wave">0 / 50</span></div>
+      <div><span class="k">타워</span><span class="v" id="count">0 / 14</span></div>
+    </div>
+    <div class="ctrl">
+      <button class="btn primary" id="go" type="button">웨이브 시작</button>
+      <button class="btn" id="speed" type="button">배속 1×</button>
+      <button class="btn" id="pause" type="button">일시정지</button>
+      <button class="btn" id="reset" type="button">새로 하기</button>
+    </div>
+  </div>
+
+  <div class="field">
+    <canvas id="map" aria-label="전장"></canvas>
+    <div class="banner" id="banner">타워를 고르고 빈 땅을 눌러 설치하세요</div>
+    <div class="overlay" id="overlay" hidden>
+      <h2 id="ov-title"></h2>
+      <p id="ov-text"></p>
+      <button class="btn primary" id="ov-btn" type="button">다시 하기</button>
+    </div>
+  </div>
+
+  <div class="dock">
+    <div class="shop" id="shop"></div>
+    <div class="info" id="info"></div>
+  </div>
+
+  <div class="aug" id="aug" role="dialog" aria-labelledby="aug-title" hidden>
+    <h2 id="aug-title">증강 선택</h2>
+    <p class="sub" id="aug-sub"></p>
+    <div class="aug-list" id="aug-list"></div>
+  </div>
+</main>
+
+<script>
+(() => {
+const css = getComputedStyle(document.documentElement);
+const tok = n => css.getPropertyValue(n).trim();
+const C = {
+  grass: tok('--grass'), dirt: tok('--dirt'), stone: tok('--stone'), red: tok('--red'),
+  teal: tok('--teal'), accent: tok('--accent'), ink: tok('--ink'), bg: tok('--bg'),
+};
+
+const W = 16, H = 10, MAX_WAVE = 50, MAX_TOWERS = 14;
+const PATH = [[-1,2],[3,2],[3,7],[7,7],[7,1],[11,1],[11,8],[14,8],[14,4],[16.6,4]].map(([x, y]) => [x + .5, y + .5]);
+const SEG = [], pathTiles = new Set();
+let TOTAL = 0;
+for (let i = 0; i < PATH.length - 1; i++) {
+  const [ax, ay] = PATH[i], [bx, by] = PATH[i + 1];
+  const len = Math.hypot(bx - ax, by - ay);
+  SEG.push({ ax, ay, bx, by, len, start: TOTAL });
+  TOTAL += len;
+  const steps = Math.ceil(len * 2);
+  for (let s = 0; s <= steps; s++) {
+    const x = Math.floor(ax + (bx - ax) * s / steps), y = Math.floor(ay + (by - ay) * s / steps);
+    if (x >= 0 && x < W && y >= 0 && y < H) pathTiles.add(x + ',' + y);
+  }
+}
+function posAt(d) {
+  for (const s of SEG) if (d <= s.start + s.len) {
+    const k = (d - s.start) / s.len;
+    return [s.ax + (s.bx - s.ax) * k, s.ay + (s.by - s.ay) * k];
+  }
+  const l = SEG[SEG.length - 1]; return [l.bx, l.by];
+}
+
+const TOWERS = {
+  archer:  { name: '궁수대', key: '1', cost: 50,  range: 2.6, dmg: 9,  rate: .6,  color: C.teal,  desc: '빠른 화살로 한 명씩 맞힙니다.' },
+  cannon:  { name: '화포',   key: '2', cost: 100, range: 2.3, dmg: 24, rate: 1.6, color: C.stone, splash: .95, desc: '포탄이 떨어진 곳 주변에 피해를 줍니다.' },
+  caltrop: { name: '마름쇠', key: '3', cost: 70,  range: 1.9, dmg: 2,  rate: .8,  color: C.accent, slow: .45, desc: '범위 안의 적을 모두 느리게 만듭니다.' },
+  rocket:  { name: '신기전', key: '4', cost: 160, range: 3.4, dmg: 15, rate: 2.2, color: C.red, multi: 4, desc: '불화살 4발을 여러 적에게 동시에 쏩니다.' },
+};
+const FOES = {
+  inf:      { name: '보병',       hp: 32,   spd: 1.15, gold: 5,  armor: 0, r: .22, color: tok('--e-inf'),  lives: 1 },
+  cav:      { name: '기병',       hp: 24,   spd: 2.0,  gold: 6,  armor: 0, r: .25, color: tok('--e-cav'),  lives: 1, slowRes: .2 },
+  hvy:      { name: '중갑병',     hp: 95,   spd: .7,   gold: 11, armor: 3, r: .28, color: tok('--e-hvy'),  lives: 2 },
+  slime:    { name: '거대 슬라임', hp: 700,  spd: .5,   gold: 40, armor: 0, r: .42, color: tok('--e-slime'), lives: 5, boss: true, slowRes: .45, note: '쓰러지면 작은 슬라임 3마리로 분열' },
+  slimelet: { name: '작은 슬라임', hp: 0,    spd: .95,  gold: 4,  armor: 0, r: .22, color: tok('--e-slime'), lives: 1, hidden: true },
+  general:  { name: '장군',       hp: 520,  spd: .55,  gold: 60, armor: 5, r: .38, color: tok('--e-boss'),  lives: 5, boss: true, slowRes: .45, summon: 3.5, note: '3.5초마다 기병 2기 소환' },
+  chariot:  { name: '전차',       hp: 1700, spd: .65,  gold: 70, armor: 6, r: .42, color: tok('--e-chariot'), lives: 5, boss: true, slowRes: .45, note: '체력 1/3을 잃을 때마다 뒤로 밀려남' },
+};
+const SLIME_SPLIT = 3, SLIMELET_HP = .2, KNOCKBACK = 2.5, BURN_TIME = 3;
+// every 5th wave: slime → general → chariot → all three, repeating; the final wave brings all three
+const BOSS_CYCLE = [['slime'], ['general'], ['chariot'], ['slime', 'general', 'chariot']];
+const bossesFor = w => w % 5 ? null : w === MAX_WAVE ? BOSS_CYCLE[3] : BOSS_CYCLE[(w / 5 - 1) % 4];
+const AUGS = [
+  { id: 'a1', type: 'archer',  name: '연발 사격',    desc: '궁수대 공격 속도 50% 증가' },
+  { id: 'a2', type: 'archer',  name: '불화살',       desc: '궁수대 공격 속도 20% 증가, 화살에 맞은 적이 3초 동안 초당 1의 화상 피해 (중첩 가능)' },
+  { id: 'a3', type: 'archer',  name: '매의 눈',      desc: '궁수대 사거리 +0.8' },
+  { id: 'c1', type: 'cannon',  name: '대장군포',     desc: '화포 피해 50% 증가' },
+  { id: 'c2', type: 'cannon',  name: '비격진천뢰',   desc: '화포 폭발 반경 50% 증가' },
+  { id: 'c3', type: 'cannon',  name: '철환',         desc: '화포에 맞은 적이 1.5초 동안 40% 느려짐' },
+  { id: 't1', type: 'caltrop', name: '독 바른 마름쇠', desc: '마름쇠 피해 4배' },
+  { id: 't2', type: 'caltrop', name: '덫 지대',      desc: '마름쇠 사거리 +0.7, 감속 +15%p' },
+  { id: 'r1', type: 'rocket',  name: '대신기전',     desc: '신기전 피해 60% 증가' },
+  { id: 'r2', type: 'rocket',  name: '산화신기전',   desc: '신기전 한 번에 3발 더 발사' },
+];
+// levels 2–3 are sure upgrades; from 4 on each attempt has a fixed price and falling odds
+const SAFE_LVL = 3;
+function stats(t) {
+  const b = TOWERS[t.type], l = Math.min(t.lvl, SAFE_LVL) - 1, x = Math.max(0, t.lvl - SAFE_LVL), A = id => S.augs.includes(id);
+  // upgrades speed up only the archer; slow never grows with level
+  let dmg = b.dmg * Math.pow(1.5, l) * Math.pow(1.2, x), range = b.range + .3 * l + .1 * x;
+  let rate = t.type === 'archer' ? b.rate * Math.pow(.88, l) * Math.pow(.96, x) : b.rate;
+  let slow = b.slow || 0, splash = b.splash ? b.splash + .15 * l + .05 * x : 0, multi = b.multi ? b.multi + l + Math.floor(x / 2) : 0;
+  let burn = false, stun = 0;
+  // attack speed +X% divides the interval by (1 + X)
+  if (t.type === 'archer')  { if (A('a1')) rate /= 1.5; if (A('a2')) { rate /= 1.2; burn = true; } if (A('a3')) range += .8; }
+  if (t.type === 'cannon')  { if (A('c1')) dmg *= 1.5; if (A('c2')) splash *= 1.5; if (A('c3')) stun = .4; }
+  if (t.type === 'caltrop') { if (A('t1')) dmg *= 4; if (A('t2')) { range += .7; slow = Math.min(.8, slow + .15); } }
+  if (t.type === 'rocket')  { if (A('r1')) dmg *= 1.6; if (A('r2')) multi += 3; }
+  return { dmg: Math.round(dmg), range: +range.toFixed(2), rate: +rate.toFixed(2), slow, splash, multi, burn, stun };
+}
+const upCost = t => Math.round(TOWERS[t.type].cost * .75 * Math.min(t.lvl, SAFE_LVL));
+// chance to reach level t.lvl + 1: 100% up to 3, then 90% for 4, −5%p per level, floor 50%
+const upChance = t => t.lvl < SAFE_LVL ? 1 : Math.max(.5, .9 - .05 * (t.lvl - SAFE_LVL));
+const upBreaks = t => t.lvl >= SAFE_LVL && upChance(t) <= .5;
+function tryUpgrade(t) {
+  const cost = upCost(t);
+  if (S.gold < cost) return;
+  S.gold -= cost;
+  const cx = t.x + .5, cy = t.y + .5;
+  if (Math.random() < upChance(t)) {
+    t.lvl++; t.spent += cost;
+    if (t.lvl > SAFE_LVL) say('강화 성공! ' + TOWERS[t.type].name + ' ' + t.lvl + '강', true, 1400);
+    S.fx.push({ ring: true, x: cx, y: cy, t: 0, life: .45, r: .8, color: C.accent });
+  } else if (upBreaks(t)) {
+    S.towers = S.towers.filter(x => x !== t); S.sel = null;
+    say('강화 실패… ' + TOWERS[t.type].name + ' ' + t.lvl + '강이 파괴되었습니다', true, 2200);
+    for (let i = 0; i < 16; i++) S.fx.push({ x: cx, y: cy, vx: (Math.random() - .5) * 4, vy: (Math.random() - .5) * 4, t: 0, life: .6, color: i % 2 ? '#6c6f68' : '#ef6a55', r: .07 });
+  } else {
+    say('강화 실패 · 레벨은 그대로입니다', false, 1400);
+  }
+  renderInfo(true);
+}
+const sellValue = t => Math.round(t.spent * .7);
+// enemies grow on three axes: HP (curve to wave 20, then steeper linear), speed (+0.8%/wave, cap +35%), armor (+1 per 10 waves)
+const hpCurve = w => 1 + .2 * (w - 1) + .012 * (w - 1) * (w - 1);
+const hpScale = w => w <= 20 ? hpCurve(w) : hpCurve(20) + .7 * (w - 20);
+const spdScale = w => Math.min(1.35, 1 + .008 * (w - 1));
+const armorBonus = w => Math.floor(w / 10);
+
+function makeWave(w) {
+  const list = [], n = Math.min(50, 5 + Math.floor(w * 1.8));
+  for (let i = 0; i < n; i++) {
+    let t = 'inf';
+    if (w >= 4 && i % 4 === 3) t = 'hvy';
+    else if (w >= 8 && i % 5 === 2) t = 'hvy';
+    else if (w >= 3 && i % 3 === 1) t = 'cav';
+    list.push(t);
+  }
+  if (bossesFor(w)) list.push(...bossesFor(w));
+  return list;
+}
+
+let S, best = 0;
+try { best = +localStorage.getItem('sanseong-best') || 0; } catch (e) {}
+let uid = 1;
+function newState() {
+  return {
+    gold: 200, lives: 20, wave: 0, mode: 'build', // build | wave | over | win
+    towers: [], foes: [], shots: [], fx: [], floats: [],
+    spawnQ: [], spawnT: 0, speed: 1, paused: false,
+    pick: null, sel: null,
+    augs: [], pendingAug: 0, augChoice: null, augWave: 0, adds: [],
+  };
+}
+function makeFoe(type, d, hp, gold) {
+  const f = FOES[type], [x, y] = posAt(d);
+  hp = hp || Math.round(f.hp * hpScale(S.wave));
+  return {
+    id: uid++, type, x, y, d, hp, max: hp, spd: f.spd * spdScale(S.wave), armor: f.armor + armorBonus(S.wave), gold: gold == null ? f.gold : gold,
+    r: f.r, color: f.color, lives: f.lives, slowRes: f.slowRes || 0, slowT: 0, slowF: 0, hit: 0,
+    sumT: f.summon || 0, stage: 0, kb: 0, burns: [], burnAcc: 0, ang: 0,
+  };
+}
+function slowFoe(e, f, t) {
+  e.slowT = Math.max(e.slowT, t);
+  e.slowF = Math.max(e.slowF, f * (1 - e.slowRes));
+}
+
+// ---- helpers ----
+const towerAt = (x, y) => S.towers.find(t => t.x === x && t.y === y);
+const canBuild = (x, y) => x >= 0 && y >= 0 && x < W && y < H && !pathTiles.has(x + ',' + y) && !towerAt(x, y);
+const banner = document.getElementById('banner');
+let bannerT = 0;
+function say(text, big, ms) {
+  banner.textContent = text; banner.classList.toggle('big', !!big);
+  banner.style.opacity = 1; bannerT = ms || 0;
+}
+
+function hurt(e, d, ignoreArmor) {
+  if (e.dead) return;
+  e.hp -= ignoreArmor ? d : Math.max(1, d - e.armor);
+  e.hit = .08;
+  if (e.type === 'chariot' && e.hp > 0) {
+    while (e.stage < 2 && e.hp <= e.max * (2 - e.stage) / 3) {
+      e.stage++; e.kb += KNOCKBACK;
+      S.floats.push({ x: e.x, y: e.y, t: 0, text: '밀려남!' });
+    }
+  }
+  if (e.hp <= 0) {
+    e.dead = true;
+    S.gold += e.gold;
+    S.floats.push({ x: e.x, y: e.y, t: 0, text: '+' + e.gold });
+    for (let i = 0; i < 8; i++) S.fx.push({ x: e.x, y: e.y, vx: (Math.random() - .5) * 2.4, vy: (Math.random() - .5) * 2.4, t: 0, life: .4, color: e.color, r: .05 });
+    if (e.type === 'slime') {
+      const hp = Math.max(1, Math.round(e.max * SLIMELET_HP));
+      for (let i = 0; i < SLIME_SPLIT; i++) S.adds.push(makeFoe('slimelet', Math.max(0, e.d - i * .35), hp));
+    }
+    if (FOES[e.type].boss) {
+      // one augment per boss wave, granted by the first boss that falls
+      if (S.augWave !== S.wave) { S.augWave = S.wave; S.pendingAug++; say(FOES[e.type].name + ' 처치! 증강을 고르세요', true, 1600); }
+      else say(FOES[e.type].name + ' 처치!', true, 1200);
+    }
+  }
+}
+
+function startWave() {
+  if (S.mode !== 'build') return;
+  S.wave++;
+  S.spawnQ = makeWave(S.wave);
+  S.spawnT = 0;
+  S.mode = 'wave';
+  const bosses = bossesFor(S.wave);
+  say('웨이브 ' + S.wave + (bosses ? ' · 보스: ' + bosses.map(b => FOES[b].name).join(', ') : ''), true, 1800);
+}
+
+// ---- update ----
+function update(dt) {
+  if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) banner.style.opacity = 0; }
+  if (S.paused || S.mode === 'over' || S.mode === 'win' || S.augChoice) return;
+  if (S.pendingAug > 0) { openAug(); if (S.augChoice) return; }
+  dt *= S.speed;
+
+  if (S.spawnQ.length) {
+    S.spawnT -= dt;
+    if (S.spawnT <= 0) {
+      const type = S.spawnQ.shift();
+      S.foes.push(makeFoe(type, 0));
+      S.spawnT = type === 'cav' ? .45 : FOES[type].boss ? 1.4 : .8;
+    }
+  }
+
+  for (const e of S.foes) {
+    if (e.dead) continue;
+    if (e.slowT > 0) e.slowT -= dt; else e.slowF = 0;
+    if (e.hit > 0) e.hit -= dt;
+    if (e.burns && e.burns.length) {
+      e.burnAcc += e.burns.length * dt;
+      e.burns = e.burns.map(t => t - dt).filter(t => t > 0);
+      if (e.burnAcc >= 1) { const n = Math.floor(e.burnAcc); e.burnAcc -= n; hurt(e, n, true); if (e.dead) continue; }
+    }
+    if (e.sumT) {
+      e.sumT -= dt;
+      if (e.sumT <= 0) {
+        e.sumT = FOES[e.type].summon;
+        for (let i = 1; i <= 2; i++) S.adds.push(makeFoe('cav', Math.max(0, e.d - i * .4), 0, 2));
+        S.floats.push({ x: e.x, y: e.y, t: 0, text: '기병 소환!' });
+      }
+    }
+    if (e.kb > 0) {
+      const m = Math.min(e.kb, 6 * dt);
+      e.kb -= m; e.d = Math.max(0, e.d - m);
+      [e.x, e.y] = posAt(e.d);
+      continue;
+    }
+    const px = e.x, py = e.y;
+    e.d += e.spd * (1 - e.slowF) * dt;
+    if (e.d >= TOTAL) {
+      e.dead = true; e.escaped = true;
+      S.lives -= e.lives;
+      say('성벽이 뚫렸습니다! -' + e.lives, false, 1000);
+      continue;
+    }
+    [e.x, e.y] = posAt(e.d);
+    if (e.x !== px || e.y !== py) e.ang = Math.atan2(e.y - py, e.x - px);
+  }
+
+  for (const t of S.towers) {
+    t.cd -= dt; if (t.pulse > 0) t.pulse -= dt;
+    if (t.cd > 0) continue;
+    const st = stats(t), cx = t.x + .5, cy = t.y + .5;
+    const inRange = S.foes.filter(e => !e.dead && Math.hypot(e.x - cx, e.y - cy) <= st.range).sort((a, b) => b.d - a.d);
+    if (!inRange.length) continue;
+    t.cd = st.rate;
+    if (t.type === 'caltrop') {
+      for (const e of inRange) { slowFoe(e, st.slow, 1.2); hurt(e, st.dmg, true); }
+      t.pulse = .35;
+      continue;
+    }
+    const tgt = inRange[0];
+    t.ang = Math.atan2(tgt.y - cy, tgt.x - cx);
+    if (t.type === 'archer') S.shots.push({ kind: 'arrow', x: cx, y: cy, tgt, tx: tgt.x, ty: tgt.y, spd: 9, dmg: st.dmg, burn: st.burn });
+    else if (t.type === 'cannon') S.shots.push({ kind: 'ball', x: cx, y: cy, sx: cx, sy: cy, tx: tgt.x, ty: tgt.y, t: 0, dur: .45, dmg: st.dmg, splash: st.splash, stun: st.stun });
+    else if (t.type === 'rocket') {
+      for (let i = 0; i < st.multi; i++) {
+        const e = inRange[i % inRange.length];
+        S.shots.push({ kind: 'rocket', x: cx, y: cy, tgt: e, tx: e.x, ty: e.y, spd: 6 + i * .5, dmg: st.dmg, delay: i * .08, wob: Math.random() * 6 });
+      }
+    }
+  }
+
+  for (const p of S.shots) {
+    if (p.delay > 0) { p.delay -= dt; continue; }
+    if (p.kind === 'ball') {
+      p.t += dt; const k = Math.min(1, p.t / p.dur);
+      p.x = p.sx + (p.tx - p.sx) * k; p.y = p.sy + (p.ty - p.sy) * k; p.h = Math.sin(k * Math.PI) * .6;
+      if (k >= 1) {
+        p.done = true;
+        for (const e of S.foes) if (!e.dead && Math.hypot(e.x - p.x, e.y - p.y) <= p.splash) {
+          hurt(e, p.dmg);
+          if (p.stun) slowFoe(e, p.stun, 1.5);
+        }
+        S.fx.push({ ring: true, x: p.x, y: p.y, t: 0, life: .3, r: p.splash, color: C.accent });
+        for (let i = 0; i < 6; i++) S.fx.push({ x: p.x, y: p.y, vx: (Math.random() - .5) * 3, vy: (Math.random() - .5) * 3, t: 0, life: .35, color: '#f4c66b', r: .06 });
+      }
+      continue;
+    }
+    if (p.tgt && !p.tgt.dead) { p.tx = p.tgt.x; p.ty = p.tgt.y; }
+    const dx = p.tx - p.x, dy = p.ty - p.y, dist = Math.hypot(dx, dy), step = p.spd * dt;
+    p.ang = Math.atan2(dy, dx);
+    if (p.kind === 'rocket') S.fx.push({ x: p.x, y: p.y, vx: 0, vy: 0, t: 0, life: .25, color: 'rgba(240,200,140,.6)', r: .04 });
+    if (dist <= step + .05) {
+      p.done = true;
+      if (p.tgt && !p.tgt.dead) {
+        if (p.burn) (p.tgt.burns = p.tgt.burns || []).push(BURN_TIME);
+        hurt(p.tgt, p.dmg);
+      }
+    } else { p.x += dx / dist * step; p.y += dy / dist * step; }
+  }
+
+  for (const f of S.fx) { f.t += dt; if (f.vx != null) { f.x += f.vx * dt; f.y += f.vy * dt; } }
+  for (const f of S.floats) f.t += dt;
+  S.fx = S.fx.filter(f => f.t < f.life);
+  S.floats = S.floats.filter(f => f.t < .9);
+  S.shots = S.shots.filter(p => !p.done);
+  if (S.adds.length) { S.foes.push(...S.adds); S.adds = []; }
+  S.foes = S.foes.filter(e => !e.dead);
+
+  if (S.lives <= 0) { S.lives = 0; end(false); return; }
+  if (S.mode === 'wave' && !S.spawnQ.length && !S.foes.length) {
+    const bonus = 20 + S.wave * 3;
+    S.gold += bonus;
+    if (S.wave > best) { best = S.wave; try { localStorage.setItem('sanseong-best', String(best)); } catch (e) {} }
+    if (S.wave >= MAX_WAVE) { end(true); return; }
+    S.mode = 'build';
+    say('웨이브 ' + S.wave + ' 방어 성공 · 보너스 +' + bonus, false, 2200);
+  }
+}
+
+// ---- overlay ----
+const ov = document.getElementById('overlay');
+function end(win) {
+  S.mode = win ? 'win' : 'over';
+  document.getElementById('ov-title').textContent = win ? '산성을 지켜냈습니다' : '산성이 함락되었습니다';
+  document.getElementById('ov-text').textContent = win
+    ? MAX_WAVE + '개 웨이브를 모두 막았습니다. 남은 성벽 ' + S.lives + ', 타워 ' + S.towers.length + '기.'
+    : '웨이브 ' + S.wave + '에서 무너졌습니다. 최고 기록은 웨이브 ' + best + '입니다.';
+  ov.hidden = false;
+  document.getElementById('ov-btn').focus({ preventScroll: true });
+}
+function seedStarter() {
+  // a starter defence so the field is never empty, plus the opening augment pick
+  S.towers.push({ id: uid++, type: 'archer', x: 4, y: 4, lvl: 1, cd: 0, spent: 50, ang: null, pulse: 0 });
+  S.gold -= 50;
+  S.pendingAug = 1;
+}
+function reset() {
+  S = newState(); seedStarter();
+  ov.hidden = true; augEl.hidden = true;
+  say('타워를 고르고 빈 땅을 눌러 설치하세요', false, 0);
+  buildShop();
+}
+document.getElementById('ov-btn').addEventListener('click', reset);
+const resetBtn = document.getElementById('reset');
+let resetArmed = 0;
+resetBtn.addEventListener('click', () => {
+  if (resetArmed || S.mode === 'over' || S.mode === 'win') {
+    clearTimeout(resetArmed); resetArmed = 0; resetBtn.textContent = '새로 하기'; resetBtn.classList.remove('on');
+    reset(); return;
+  }
+  resetBtn.textContent = '한 번 더 누르면 새 게임'; resetBtn.classList.add('on');
+  resetArmed = setTimeout(() => { resetArmed = 0; resetBtn.textContent = '새로 하기'; resetBtn.classList.remove('on'); }, 2500);
+});
+
+// ---- render ----
+const cv = document.getElementById('map');
+let T = 40, hover = null;
+function fit() {
+  const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  const w = Math.round(r.width * d), h = Math.round(r.height * d);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; bg = null; }
+  T = cv.width / W;
+}
+const hash = (x, y) => { let n = x * 374761393 + y * 668265263; n = (n ^ (n >> 13)) * 1274126177; return ((n ^ (n >> 16)) >>> 0) / 4294967295; };
+let bg = null;
+function drawBackground() {
+  bg = document.createElement('canvas'); bg.width = cv.width; bg.height = cv.height;
+  const g = bg.getContext('2d');
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const n = hash(x, y);
+    g.fillStyle = C.grass; g.fillRect(x * T, y * T, T + 1, T + 1);
+    g.fillStyle = n > .5 ? 'rgba(255,255,255,' + (n - .5) * .09 + ')' : 'rgba(0,0,0,' + (.5 - n) * .12 + ')';
+    g.fillRect(x * T, y * T, T + 1, T + 1);
+    if (n > .82) { g.fillStyle = 'rgba(30,50,25,.35)'; for (let k = 0; k < 3; k++) g.fillRect(x * T + T * (.2 + hash(x + k, y) * .6), y * T + T * (.3 + hash(x, y + k) * .5), T * .05, T * .16); }
+  }
+  // path
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = T * .98;
+  g.beginPath(); PATH.forEach(([x, y], i) => i ? g.lineTo(x * T, y * T + T * .04) : g.moveTo(x * T, y * T + T * .04)); g.stroke();
+  g.strokeStyle = C.dirt; g.lineWidth = T * .9;
+  g.beginPath(); PATH.forEach(([x, y], i) => i ? g.lineTo(x * T, y * T) : g.moveTo(x * T, y * T)); g.stroke();
+  for (const k of pathTiles) {
+    const [x, y] = k.split(',').map(Number);
+    for (let i = 0; i < 4; i++) {
+      const px = x + .15 + hash(x * 7 + i, y) * .7, py = y + .15 + hash(x, y * 7 + i) * .7;
+      g.fillStyle = 'rgba(90,70,40,.35)'; g.beginPath(); g.arc(px * T, py * T, T * .035, 0, 7); g.fill();
+    }
+  }
+  // fortress wall on the right edge with a red gate
+  g.fillStyle = '#4f524c'; g.fillRect(W * T - T * .38, 0, T * .38, H * T);
+  g.fillStyle = 'rgba(255,255,255,.08)';
+  for (let y = 0; y < H * 2; y++) g.fillRect(W * T - T * .38, y * T / 2, T * .38, 1);
+  for (let y = 0; y < H * 2; y++) { g.fillStyle = '#5c605a'; g.fillRect(W * T - T * .46, y * T / 2 + T * .05, T * .1, T * .3); }
+  g.fillStyle = C.red; g.fillRect(W * T - T * .42, 4 * T + T * .12, T * .42, T * .76);
+  g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(W * T - T * .42, 4 * T + T * .46, T * .42, T * .04);
+  // enemy camp flag at the left edge
+  g.fillStyle = '#3a2a1e'; g.fillRect(T * .1, 2 * T - T * .2, T * .05, T * .7);
+  g.fillStyle = '#7a2a2a'; g.beginPath(); g.moveTo(T * .15, 2 * T - T * .2); g.lineTo(T * .5, 2 * T - T * .05); g.lineTo(T * .15, 2 * T + T * .1); g.fill();
+}
+
+function drawTowerIcon(g, type, cx, cy, s, ang, lvl) {
+  g.save(); g.translate(cx, cy);
+  g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.ellipse(0, s * .32, s * .4, s * .14, 0, 0, 7); g.fill();
+  g.fillStyle = '#585b55'; g.strokeStyle = '#3e403b'; g.lineWidth = Math.max(1, s * .04);
+  g.beginPath(); g.roundRect(-s * .38, -s * .34, s * .76, s * .72, s * .1); g.fill(); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.1)'; g.fillRect(-s * .38, -s * .34, s * .76, s * .08);
+  const a = ang == null ? -Math.PI / 4 : ang;
+  if (type === 'archer') {
+    g.fillStyle = C.teal; g.beginPath(); g.arc(0, 0, s * .24, 0, 7); g.fill();
+    g.rotate(a); g.strokeStyle = '#e8dcc0'; g.lineWidth = s * .05;
+    g.beginPath(); g.arc(-s * .02, 0, s * .2, -1.2, 1.2); g.stroke();
+    g.beginPath(); g.moveTo(-s * .05, 0); g.lineTo(s * .3, 0); g.stroke();
+  } else if (type === 'cannon') {
+    g.fillStyle = '#2e302d'; g.beginPath(); g.arc(0, 0, s * .22, 0, 7); g.fill();
+    g.rotate(a); g.fillStyle = '#1f201e'; g.fillRect(0, -s * .09, s * .38, s * .18);
+    g.fillStyle = C.accent; g.fillRect(s * .3, -s * .1, s * .06, s * .2);
+  } else if (type === 'caltrop') {
+    g.fillStyle = C.accent; g.beginPath();
+    for (let i = 0; i < 8; i++) { const r = i % 2 ? s * .1 : s * .27, t = i * Math.PI / 4; g.lineTo(Math.cos(t) * r, Math.sin(t) * r); }
+    g.closePath(); g.fill();
+    g.fillStyle = '#5a4512'; g.beginPath(); g.arc(0, 0, s * .06, 0, 7); g.fill();
+  } else if (type === 'rocket') {
+    g.rotate(a); g.fillStyle = C.red; g.fillRect(-s * .24, -s * .2, s * .44, s * .4);
+    g.fillStyle = '#2a1512';
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) { g.beginPath(); g.arc(s * .12, -s * .12 + i * s * .12, s * .035, 0, 7); g.fill(); g.beginPath(); g.arc(-s * .02 - j * s * .1, -s * .12 + i * s * .12, s * .03, 0, 7); g.fill(); }
+  }
+  g.restore();
+  if (lvl > 1 && lvl <= 3) for (let i = 0; i < lvl; i++) { g.fillStyle = C.accent; g.beginPath(); g.arc(cx - s * .22 + i * s * .22, cy + s * .48, s * .06, 0, 7); g.fill(); }
+  else if (lvl > 3) {
+    const label = '+' + lvl, fs = Math.round(s * .26);
+    g.font = '700 ' + fs + 'px "JetBrains Mono", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const w = g.measureText(label).width + s * .14;
+    g.fillStyle = lvl >= 12 ? C.red : 'rgba(20,22,18,.85)'; g.beginPath(); g.roundRect(cx - w / 2, cy + s * .36, w, fs * 1.15, fs * .3); g.fill();
+    g.fillStyle = C.accent; g.fillText(label, cx, cy + s * .36 + fs * .6);
+    g.textBaseline = 'alphabetic';
+  }
+}
+
+function ring(g, cx, cy, r, ok) {
+  g.fillStyle = ok ? 'rgba(255,255,255,.08)' : 'rgba(200,67,47,.12)';
+  g.strokeStyle = ok ? 'rgba(255,255,255,.55)' : 'rgba(200,67,47,.7)';
+  g.lineWidth = Math.max(1, T * .03); g.setLineDash([T * .12, T * .08]);
+  g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill(); g.stroke(); g.setLineDash([]);
+}
+
+function draw() {
+  fit();
+  const g = cv.getContext('2d');
+  if (!bg) drawBackground();
+  g.drawImage(bg, 0, 0);
+
+  // hover tile
+  if (hover && S.pick) {
+    const ok = canBuild(hover.x, hover.y) && S.gold >= TOWERS[S.pick].cost;
+    g.fillStyle = ok ? 'rgba(255,255,255,.18)' : 'rgba(200,67,47,.3)';
+    g.fillRect(hover.x * T, hover.y * T, T, T);
+    if (canBuild(hover.x, hover.y)) ring(g, (hover.x + .5) * T, (hover.y + .5) * T, stats({ type: S.pick, lvl: 1 }).range * T, ok);
+  }
+  if (S.sel) { const st = stats(S.sel); ring(g, (S.sel.x + .5) * T, (S.sel.y + .5) * T, st.range * T, true); }
+
+  for (const t of S.towers) {
+    if (t.type === 'caltrop' && t.pulse > 0) {
+      const k = 1 - t.pulse / .35;
+      g.strokeStyle = 'rgba(226,179,60,' + (1 - k) * .6 + ')'; g.lineWidth = T * .06;
+      g.beginPath(); g.arc((t.x + .5) * T, (t.y + .5) * T, stats(t).range * T * k, 0, 7); g.stroke();
+    }
+    drawTowerIcon(g, t.type, (t.x + .5) * T, (t.y + .5) * T, T, t.ang, t.lvl);
+    if (t === S.sel) { g.strokeStyle = C.accent; g.lineWidth = T * .05; g.strokeRect(t.x * T + 2, t.y * T + 2, T - 4, T - 4); }
+  }
+
+  if (hover && S.pick && canBuild(hover.x, hover.y)) { g.globalAlpha = .55; drawTowerIcon(g, S.pick, (hover.x + .5) * T, (hover.y + .5) * T, T); g.globalAlpha = 1; }
+
+  for (const e of S.foes) {
+    const x = e.x * T, y = e.y * T, r = e.r * T;
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.ellipse(x, y + r * .8, r * .9, r * .35, 0, 0, 7); g.fill();
+    const body = e.hit > 0 ? '#ffffff' : e.color;
+    g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = Math.max(1, T * .03);
+    if (e.type === 'slime' || e.type === 'slimelet') {
+      const wob = Math.sin(e.d * 9) * .08;
+      g.fillStyle = body; g.beginPath(); g.ellipse(x, y + r * .1, r * (1 + wob), r * (.85 - wob), 0, 0, 7); g.fill(); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.ellipse(x - r * .35, y - r * .25, r * .22, r * .14, -.5, 0, 7); g.fill();
+      g.fillStyle = '#1d2a18'; g.beginPath(); g.arc(x - r * .25, y, r * .1, 0, 7); g.arc(x + r * .25, y, r * .1, 0, 7); g.fill();
+    } else if (e.type === 'chariot') {
+      g.save(); g.translate(x, y); g.rotate(e.ang || 0);
+      g.fillStyle = '#2b1f14'; g.fillRect(-r * .7, -r * 1.05, r * .6, r * .3); g.fillRect(-r * .7, r * .75, r * .6, r * .3);
+      g.fillStyle = body; g.fillRect(-r, -r * .75, r * 1.7, r * 1.5); g.strokeRect(-r, -r * .75, r * 1.7, r * 1.5);
+      g.fillStyle = '#5a4026'; g.fillRect(r * .7, -r * .12, r * .55, r * .24);
+      g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(-r, -r * .75, r * 1.7, r * .25);
+      g.restore();
+    } else {
+      g.fillStyle = body; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.stroke();
+      if (e.type === 'cav') { g.fillStyle = '#5a3a1e'; g.beginPath(); g.arc(x + r * .5, y - r * .2, r * .35, 0, 7); g.fill(); }
+      if (e.type === 'hvy' || e.type === 'general') { g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - r * .6, y - r * .15, r * 1.2, r * .3); }
+      if (e.type === 'general') {
+        g.fillStyle = C.accent; g.beginPath(); g.moveTo(x - r * .5, y - r * .7); g.lineTo(x, y - r * 1.35); g.lineTo(x + r * .5, y - r * .7); g.fill();
+        g.fillStyle = '#3a2a1e'; g.fillRect(x + r * .8, y - r * 1.4, T * .03, r * 1.6);
+        g.fillStyle = C.red; g.fillRect(x + r * .8, y - r * 1.4, r * .6, r * .45);
+      }
+    }
+    if (e.burns && e.burns.length) {
+      g.fillStyle = '#ff9a3c';
+      for (let i = 0; i < Math.min(e.burns.length, 5); i++) { const a = e.d * 4 + i * 1.26; g.beginPath(); g.arc(x + Math.cos(a) * r * .9, y + Math.sin(a) * r * .9, T * .035, 0, 7); g.fill(); }
+    }
+    if (e.slowF > 0) { g.strokeStyle = C.accent; g.lineWidth = T * .04; g.beginPath(); g.arc(x, y, r + T * .06, 0, 7); g.stroke(); }
+    const bw = Math.max(r * 2, T * .5), k = Math.max(0, e.hp / e.max);
+    g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(x - bw / 2, y - r - T * .16, bw, T * .07);
+    g.fillStyle = k > .5 ? '#8fd18a' : k > .25 ? C.accent : '#ef6a55'; g.fillRect(x - bw / 2, y - r - T * .16, bw * k, T * .07);
+  }
+
+  for (const p of S.shots) {
+    if (p.delay > 0) continue;
+    if (p.kind === 'arrow') {
+      g.save(); g.translate(p.x * T, p.y * T); g.rotate(p.ang || 0);
+      g.strokeStyle = '#efe4c8'; g.lineWidth = Math.max(1, T * .035);
+      g.beginPath(); g.moveTo(-T * .18, 0); g.lineTo(T * .1, 0); g.stroke(); g.restore();
+    } else if (p.kind === 'ball') {
+      g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(p.x * T, p.y * T, T * .07, 0, 7); g.fill();
+      g.fillStyle = '#1b1c1a'; g.beginPath(); g.arc(p.x * T, (p.y - p.h) * T, T * .1, 0, 7); g.fill();
+    } else {
+      g.save(); g.translate(p.x * T, p.y * T); g.rotate(p.ang || 0);
+      g.fillStyle = C.red; g.fillRect(-T * .12, -T * .03, T * .2, T * .06);
+      g.fillStyle = '#ffcf6b'; g.beginPath(); g.arc(-T * .14, 0, T * .04, 0, 7); g.fill(); g.restore();
+    }
+  }
+  for (const f of S.fx) {
+    const k = f.t / f.life;
+    if (f.ring) { g.strokeStyle = 'rgba(244,198,107,' + (1 - k) + ')'; g.lineWidth = T * .06; g.beginPath(); g.arc(f.x * T, f.y * T, f.r * T * (.4 + k * .6), 0, 7); g.stroke(); }
+    else { g.globalAlpha = 1 - k; g.fillStyle = f.color; g.beginPath(); g.arc(f.x * T, f.y * T, f.r * T, 0, 7); g.fill(); g.globalAlpha = 1; }
+  }
+  g.font = '700 ' + Math.round(T * .3) + 'px "JetBrains Mono", monospace'; g.textAlign = 'center';
+  for (const f of S.floats) { g.globalAlpha = 1 - f.t / .9; g.fillStyle = C.accent; g.fillText(f.text, f.x * T, (f.y - .3 - f.t * .6) * T); }
+  g.globalAlpha = 1;
+}
+
+// ---- shop & info ----
+const shop = document.getElementById('shop'), info = document.getElementById('info');
+function buildShop() {
+  shop.innerHTML = '';
+  for (const [type, b] of Object.entries(TOWERS)) {
+    const el = document.createElement('button');
+    el.type = 'button'; el.className = 'card'; el.dataset.type = type;
+    el.innerHTML = '<div class="row"><canvas width="72" height="72"></canvas><div><div class="nm"></div><div class="cost"></div></div><span class="key"></span></div><div class="ds"></div><div class="augs"></div>';
+    const mine = AUGS.filter(a => a.type === type && S.augs.includes(a.id));
+    el.querySelector('.augs').textContent = mine.map(a => '★ ' + a.name).join('  ');
+    el.querySelector('.nm').textContent = b.name;
+    el.querySelector('.cost').textContent = b.cost + '금';
+    el.querySelector('.key').textContent = b.key;
+    el.querySelector('.ds').textContent = b.desc;
+    drawTowerIcon(el.querySelector('canvas').getContext('2d'), type, 36, 34, 64);
+    el.addEventListener('click', () => choose(S.pick === type ? null : type));
+    shop.append(el);
+  }
+  renderInfo();
+}
+function choose(type) { S.pick = type; S.sel = null; renderInfo(); }
+
+// ---- augments ----
+const augEl = document.getElementById('aug');
+function openAug() {
+  const left = AUGS.filter(a => !S.augs.includes(a.id));
+  if (!left.length) { S.pendingAug = 0; return; }
+  for (let i = left.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [left[i], left[j]] = [left[j], left[i]]; }
+  S.augChoice = left.slice(0, 3).map(a => a.id);
+  showAug();
+}
+function showAug() {
+  const list = document.getElementById('aug-list');
+  list.innerHTML = '';
+  document.getElementById('aug-sub').textContent = S.wave === 0
+    ? '출정 전, 강화할 타워를 하나 고르세요.'
+    : '장수를 쓰러뜨렸습니다. 보상으로 하나를 고르세요.';
+  S.augChoice.forEach((id, i) => {
+    const a = AUGS.find(x => x.id === id), b = TOWERS[a.type];
+    const el = document.createElement('button');
+    el.type = 'button'; el.className = 'aug-card';
+    el.innerHTML = '<div class="top-row"><canvas width="88" height="88"></canvas><span class="tag"></span><span class="num"></span></div><div class="an"></div><div class="ad"></div>';
+    drawTowerIcon(el.querySelector('canvas').getContext('2d'), a.type, 44, 42, 80);
+    const tag = el.querySelector('.tag'); tag.textContent = b.name; tag.style.background = b.color;
+    if (a.type === 'caltrop') tag.style.color = '#2a2208';
+    el.querySelector('.num').textContent = i + 1;
+    el.querySelector('.an').textContent = a.name;
+    el.querySelector('.ad').textContent = a.desc;
+    el.addEventListener('click', () => pickAug(id));
+    list.append(el);
+  });
+  augEl.hidden = false;
+  list.firstChild && list.firstChild.focus({ preventScroll: true });
+}
+function pickAug(id) {
+  if (!S.augChoice || !S.augChoice.includes(id)) return;
+  const a = AUGS.find(x => x.id === id);
+  S.augs.push(id); S.pendingAug = Math.max(0, S.pendingAug - 1); S.augChoice = null;
+  augEl.hidden = true;
+  buildShop(); renderInfo(true);
+  say('증강 획득: ' + TOWERS[a.type].name + ' · ' + a.name, false, 1800);
+}
+let infoKey = '';
+function renderInfo(force) {
+  const t = S.sel;
+  const key = [S.pick, t && t.id, t && t.lvl, S.gold >= (t ? upCost(t) : 0), Math.floor(S.gold)].join();
+  shop.querySelectorAll('.card').forEach(c => {
+    c.classList.toggle('sel', c.dataset.type === S.pick);
+    c.classList.toggle('poor', S.gold < TOWERS[c.dataset.type].cost || S.towers.length >= MAX_TOWERS);
+  });
+  if (key === infoKey && !force) return; infoKey = key;
+  if (t) {
+    const b = TOWERS[t.type], st = stats(t), cost = upCost(t), p = upChance(t), breaks = upBreaks(t);
+    const nx = stats({ ...t, lvl: t.lvl + 1 });
+    const row = (k, v, n) => '<dt>' + k + '</dt><dd>' + v + (n != null && n !== v ? ' <i>→ ' + n + '</i>' : '') + '</dd>';
+    let dl = row('레벨', t.lvl + '강') + row('강화 성공률', Math.round(p * 100) + '%') +
+      row('피해', st.dmg, nx.dmg) + row('사거리', st.range, nx.range) + row('공격 간격', st.rate + '초', nx.rate + '초');
+    if (st.slow) dl += row('감속', Math.round(st.slow * 100) + '%', nx && Math.round(nx.slow * 100) + '%');
+    if (st.splash) dl += row('폭발 반경', st.splash.toFixed(2), nx && nx.splash.toFixed(2));
+    if (st.multi) dl += row('동시 발사', st.multi + '발', nx && nx.multi + '발');
+    const warn = t.lvl < SAFE_LVL ? '' : breaks
+      ? '<p class="warn">실패하면 타워가 파괴됩니다.</p>'
+      : '<p class="muted">실패하면 금만 잃고 레벨은 그대로입니다.</p>';
+    info.innerHTML = '<h3></h3><dl>' + dl + '</dl>' + warn + '<div class="acts"><button class="btn primary" id="up" type="button"></button><button class="btn" id="sell" type="button"></button></div>';
+    info.querySelector('h3').textContent = b.name + ' ' + t.lvl + '강';
+    const up = info.querySelector('#up');
+    up.textContent = (t.lvl < SAFE_LVL ? '강화 ' : '강화 시도 ') + cost + '금' + (p < 1 ? ' · ' + Math.round(p * 100) + '%' : '');
+    up.disabled = S.gold < cost;
+    up.onclick = () => tryUpgrade(t);
+    const sell = info.querySelector('#sell');
+    sell.textContent = '판매 +' + sellValue(t) + '금';
+    sell.onclick = () => { S.gold += sellValue(t); S.towers = S.towers.filter(x => x !== t); S.sel = null; renderInfo(true); };
+  } else if (S.pick) {
+    const b = TOWERS[S.pick];
+    info.innerHTML = '<h3></h3><p class="muted"></p><dl></dl><p class="muted">빈 땅을 눌러 설치하세요. Esc로 취소합니다.</p>';
+    info.querySelector('h3').textContent = b.name + ' 설치';
+    info.querySelector('p').textContent = b.desc;
+    const st = stats({ type: S.pick, lvl: 1 });
+    info.querySelector('dl').innerHTML = '<dt>비용</dt><dd>' + b.cost + '금</dd><dt>피해</dt><dd>' + st.dmg + '</dd><dt>사거리</dt><dd>' + st.range + '</dd><dt>공격 간격</dt><dd>' + st.rate + '초</dd>';
+  } else {
+    const foeRow = f => '<dt>' + f.name + '</dt><dd>체력 ' + f.hp + (f.armor ? ' · 갑옷 ' + f.armor : '') + ' · ' + (f.spd >= 1.5 ? '빠름' : f.spd < .8 ? '느림' : '보통') + (f.slowRes ? ' · 둔화 저항 ' + Math.round(f.slowRes * 100) + '%' : '') + (f.note ? '<br>' + f.note : '') + '</dd>';
+    const foes = Object.values(FOES).filter(f => !f.hidden);
+    const w = Math.max(1, S.mode === 'wave' ? S.wave : S.wave + 1);
+    const scale = '<p class="muted">웨이브 ' + w + ' 적: 체력 ×' + hpScale(w).toFixed(1) + ' · 속도 ×' + spdScale(w).toFixed(2) + ' · 갑옷 +' + armorBonus(w) + '</p>';
+    info.innerHTML = '<h3>적의 행렬</h3>' + scale + '<dl>' + foes.filter(f => !f.boss).map(foeRow).join('') + '</dl>' +
+      '<h3>보스</h3><dl>' + foes.filter(f => f.boss).map(foeRow).join('') + '</dl>' +
+      '<p class="muted">5웨이브마다 슬라임 → 장군 → 전차 → 셋 모두 순서로 보스가 나오고, 마지막 ' + MAX_WAVE + '웨이브에는 셋이 모두 나옵니다. 보스 웨이브마다 증강을 하나 고릅니다. 타워는 최대 ' + MAX_TOWERS + '기까지 지을 수 있습니다.</p>';
+  }
+}
+
+// ---- input ----
+function tileFrom(ev) {
+  const r = cv.getBoundingClientRect();
+  return { x: Math.floor((ev.clientX - r.left) / r.width * W), y: Math.floor((ev.clientY - r.top) / r.height * H) };
+}
+cv.addEventListener('pointermove', e => { hover = tileFrom(e); });
+cv.addEventListener('pointerleave', () => { hover = null; });
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (S.pick || S.sel) { S.pick = null; S.sel = null; renderInfo(true); }
+});
+cv.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  if (S.mode === 'over' || S.mode === 'win' || S.augChoice) return;
+  const p = tileFrom(e); hover = p;
+  const t = towerAt(p.x, p.y);
+  if (t) { S.sel = t; S.pick = null; renderInfo(true); return; }
+  if (S.pick) {
+    const b = TOWERS[S.pick];
+    if (S.towers.length >= MAX_TOWERS) { say('타워는 최대 ' + MAX_TOWERS + '기까지 지을 수 있습니다. 판매하면 자리가 생깁니다', false, 1800); return; }
+    if (!canBuild(p.x, p.y)) { say('길 위에는 지을 수 없습니다', false, 1200); return; }
+    if (S.gold < b.cost) { say('금이 ' + (b.cost - S.gold) + ' 부족합니다', false, 1200); return; }
+    S.gold -= b.cost;
+    S.towers.push({ id: uid++, type: S.pick, x: p.x, y: p.y, lvl: 1, cd: 0, spent: b.cost, ang: null, pulse: 0 });
+    if (bannerT <= 0) banner.style.opacity = 0;
+    renderInfo(true);
+    return;
+  }
+  S.sel = null; renderInfo(true);
+});
+
+const goBtn = document.getElementById('go'), speedBtn = document.getElementById('speed'), pauseBtn = document.getElementById('pause');
+goBtn.addEventListener('click', startWave);
+speedBtn.addEventListener('click', () => { S.speed = S.speed === 1 ? 2 : S.speed === 2 ? 3 : 1; });
+pauseBtn.addEventListener('click', () => { S.paused = !S.paused; });
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
+  if (S.augChoice) {
+    const i = +e.key - 1;
+    if (i >= 0 && i < S.augChoice.length) pickAug(S.augChoice[i]);
+    return;
+  }
+  const type = Object.keys(TOWERS).find(k => TOWERS[k].key === e.key);
+  if (type) { choose(S.pick === type ? null : type); return; }
+  if (e.key === 'Escape') { S.pick = null; S.sel = null; renderInfo(true); }
+  else if (e.key === ' ') { e.preventDefault(); startWave(); }
+  else if (e.key === 'p' || e.key === 'P') S.paused = !S.paused;
+  else if (e.key === 'f' || e.key === 'F') speedBtn.click();
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && S.mode === 'wave') S.paused = true; });
+
+const $ = id => document.getElementById(id);
+let hudKey = '';
+function hud() {
+  const k = [S.gold, S.lives, S.wave, S.mode, S.speed, S.paused, S.towers.length].join();
+  if (k === hudKey) return; hudKey = k;
+  $('gold').textContent = S.gold;
+  $('count').textContent = S.towers.length + ' / ' + MAX_TOWERS;
+  $('count').style.color = S.towers.length >= MAX_TOWERS ? '#ef8a78' : '';
+  $('lives').textContent = S.lives;
+  $('wave').textContent = S.wave + ' / ' + MAX_WAVE;
+  goBtn.disabled = S.mode !== 'build';
+  goBtn.textContent = S.mode === 'wave' ? '전투 중…' : S.wave === 0 ? '웨이브 시작' : '웨이브 ' + (S.wave + 1) + ' 시작';
+  speedBtn.textContent = '배속 ' + S.speed + '×'; speedBtn.classList.toggle('on', S.speed > 1);
+  pauseBtn.textContent = S.paused ? '계속하기' : '일시정지'; pauseBtn.classList.toggle('on', S.paused);
+  renderInfo();
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, .1); last = now;
+  update(dt); draw(); hud();
+  requestAnimationFrame(frame);
+}
+addEventListener('resize', () => { bg = null; });
+
+// ---- boot (keeps a game in progress across page updates) ----
+function start(data) {
+  S = newState();
+  if (data && data.state) {
+    Object.assign(S, data.state);
+    S.shots = []; S.sel = null; S.paused = S.mode === 'wave';
+    uid = Math.max(uid, ...S.towers.map(t => t.id + 1), ...S.foes.map(f => f.id + 1));
+    banner.style.opacity = 0;
+    if (S.mode === 'over' || S.mode === 'win') end(S.mode === 'win');
+    S.augs = S.augs || []; S.pendingAug = S.pendingAug || 0; S.augWave = S.augWave || 0; S.adds = S.adds || [];
+    S.foes = S.foes.filter(e => FOES[e.type]);
+    S.spawnQ = S.spawnQ.filter(t => FOES[t]);
+    if (S.augChoice) showAug();
+  } else {
+    seedStarter();
+  }
+  buildShop();
+  requestAnimationFrame(frame);
+}
+window.claude?.hot?.snapshot?.(() => ({ state: { ...S, shots: [], sel: null } }));
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+})();
+</script>
