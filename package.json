@@ -2,5 +2,8 @@
   "name": "changwon-cold-shelter",
   "private": true,
   "type": "module",
-  "description": "창원 한파쉼터 찾기 (3주차 PoC)"
+  "description": "창원 한파쉼터 찾기 (3주차 PoC)",
+  "scripts": {
+    "dev": "node dev.js"
+  }
 }

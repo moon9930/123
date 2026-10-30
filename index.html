@@ -77,6 +77,12 @@
   function setDate(d) { if (d) dateEl.textContent = d; }
 
   async function loadDongs() {
+    // 파일을 더블클릭해서 열면 서버 함수(api/)가 없어 데이터를 못 부른다
+    if (location.protocol === "file:") {
+      dongEl.innerHTML = "<option>서버 필요</option>";
+      summaryEl.textContent = "파일을 직접 열면 데이터를 불러올 수 없습니다. 터미널에서 npm run dev 를 실행하고 http://localhost:3000 으로 여세요.";
+      return;
+    }
     try {
       const res = await fetch("/api/shelters");
       const data = await res.json();
