@@ -1,0 +1,9 @@
+{
+  "name": "changwon-bike-places",
+  "private": true,
+  "type": "module",
+  "description": "창원 자전거 보관소·대여소 찾기 (3주차 PoC)",
+  "scripts": {
+    "dev": "node dev.js"
+  }
+}

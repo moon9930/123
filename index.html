@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>창원 자전거 보관소·대여소 찾기</title>
+<style>
+  :root {
+    --bg: #f2f5f3; --surface: #ffffff; --ink: #15241d; --muted: #5a6b62; --line: #d5dfd9;
+    --accent: #13795b; --accent-ink: #ffffff;
+    --storage: #1f5fa8; --storage-bg: #e6eef8;
+    --rental: #b4511b; --rental-bg: #fbeee5;
+    --warn: #9a5b00; --warn-bg: #fff3dc;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1613; --surface: #18221d; --ink: #e6efe9; --muted: #9db0a5; --line: #2b3a32;
+      --accent: #3fbf8f; --accent-ink: #0b1510;
+      --storage: #8db8ee; --storage-bg: #1c2a3b;
+      --rental: #f0a274; --rental-bg: #3a2519;
+      --warn: #f2be6b; --warn-bg: #3a2c12;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+    font-size: 17px; line-height: 1.55; word-break: keep-all; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { font-size: 1.45rem; line-height: 1.3; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 18px; }
+  .controls { display: grid; gap: 10px; }
+  button, select { font: inherit; border-radius: 10px; min-height: 48px; }
+  #nearBtn { border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 700; cursor: pointer; }
+  #nearBtn:disabled { opacity: .6; cursor: wait; }
+  .or { display: flex; align-items: center; gap: 10px; }
+  .or label { font-weight: 700; white-space: nowrap; }
+  select { flex: 1; padding: 0 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #message { margin: 18px 0 10px; font-weight: 700; min-height: 1.5em; }
+  #message.warn { background: var(--warn-bg); color: var(--warn); padding: 10px 12px; border-radius: 8px; }
+  #message .retry { margin-left: 8px; min-height: 36px; padding: 0 12px; border: 1px solid currentColor;
+    background: transparent; color: inherit; cursor: pointer; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+  .top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .tag { font-size: .8rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+  .tag.storage { color: var(--storage); background: var(--storage-bg); }
+  .tag.rental { color: var(--rental); background: var(--rental-bg); }
+  .name { font-weight: 700; }
+  .dist { margin-left: auto; font-weight: 700; color: var(--accent); white-space: nowrap; }
+  .meta { color: var(--muted); font-size: .95rem; margin-top: 4px; }
+  .status { display: inline-block; margin-top: 6px; font-size: .9rem; font-weight: 700; color: var(--warn); }
+  .status.open { color: var(--accent); }
+  .map { display: inline-block; margin-top: 8px; font-size: .95rem; color: var(--accent); font-weight: 700; }
+  footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+  footer p { margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>창원 자전거 보관소·대여소 찾기</h1>
+  <p class="lead">가까운 자전거 보관소와 대여소를 찾아 드려요.</p>
+
+  <div class="controls">
+    <button id="nearBtn" type="button">📍 내 위치로 찾기</button>
+    <div class="or">
+      <label for="gu">또는 구 선택</label>
+      <select id="gu"><option value="">구를 고르세요</option></select>
+    </div>
+  </div>
+
+  <p id="message" role="status" aria-live="polite"></p>
+  <ul id="list"></ul>
+
+  <footer id="sources">
+    <p>데이터 출처를 불러오는 중…</p>
+  </footer>
+</main>
+
+<script>
+  // 화면은 Supabase를 직접 부르지 않는다: 화면 → /api/places → Supabase
+  const $ = (id) => document.getElementById(id);
+  const nearBtn = $("nearBtn"), guSelect = $("gu"), message = $("message"), list = $("list");
+  const TYPE_LABEL = { storage: "보관소", rental: "대여소" };
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const formatDistance = (m) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`);
+  const mapLink = (p) =>
+    `https://map.kakao.com/link/map/${encodeURIComponent(p.name)},${p.lat},${p.lng}`;
+
+  function setMessage(text, warn = false, retry = false) {
+    message.className = warn ? "warn" : "";
+    message.innerHTML = esc(text) + (retry ? ' <button class="retry" type="button">다시 시도</button>' : "");
+    if (retry) message.querySelector(".retry").onclick = findNear;
+  }
+
+  async function getJson(url) {
+    const res = await fetch(url);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "데이터를 불러오지 못했습니다.");
+    return body;
+  }
+
+  function render(places) {
+    list.innerHTML = places.map((p) => {
+      const lines = [];
+      if (p.type === "storage") {
+        lines.push(`보관대수 ${p.capacity ?? "확인 필요"}대`);
+      } else {
+        lines.push(`보유 자전거 ${p.capacity ?? "확인 필요"}대`);
+        if (p.hours) lines.push(`운영 ${p.hours}`);
+        if (p.fee) lines.push(`요금 ${p.fee}`);
+      }
+      const status = p.status
+        ? `<span class="status ${p.status.status === "open" ? "open" : ""}">${esc(p.status.label)}</span><br>` : "";
+      return `<li>
+        <div class="top">
+          <span class="tag ${p.type}">${TYPE_LABEL[p.type] || p.type}</span>
+          <span class="name">${esc(p.name)}</span>
+          ${p.distance != null ? `<span class="dist">${formatDistance(p.distance)}</span>` : ""}
+        </div>
+        <div class="meta">${esc(p.address)}</div>
+        <div class="meta">${lines.map(esc).join(" · ")}</div>
+        ${status}
+        <a class="map" href="${mapLink(p)}" target="_blank" rel="noopener">지도에서 보기 ›</a>
+      </li>`;
+    }).join("");
+  }
+
+  // ① 내 위치로 찾기 (학습 노트: getCurrentPosition · err.code 1·2·3 · timeout 5000)
+  const GEO_ERROR = {
+    1: "위치 사용이 허용되지 않았어요. 아래에서 구를 골라 주세요.",
+    2: "지금 위치를 알 수 없어요. 아래에서 구를 골라 주세요.",
+    3: "위치 확인이 오래 걸려요.",
+  };
+
+  function findNear() {
+    if (!("geolocation" in navigator)) {
+      return setMessage("이 브라우저는 위치 찾기를 지원하지 않아요. 구를 골라 주세요.", true);
+    }
+    nearBtn.disabled = true;
+    list.innerHTML = "";
+    setMessage("위치 확인 중…");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          // 소수 4자리(약 10m)로 줄여서 보낸다
+          const lat = pos.coords.latitude.toFixed(4), lng = pos.coords.longitude.toFixed(4);
+          setMessage("가까운 곳을 찾는 중…");
+          const data = await getJson(`/api/places?lat=${lat}&lng=${lng}`);
+          guSelect.value = "";
+          setMessage(`내 위치에서 가까운 ${data.places.length}곳`);
+          render(data.places);
+        } catch (e) {
+          setMessage(e.message, true, true);
+        } finally {
+          nearBtn.disabled = false;
+        }
+      },
+      (err) => {
+        nearBtn.disabled = false;
+        setMessage(GEO_ERROR[err.code] || "위치를 확인하지 못했어요.", true, err.code === 3);
+        guSelect.focus();
+      },
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+    );
+  }
+
+  // ② 구로 찾기
+  async function findByGu() {
+    const gu = guSelect.value;
+    if (!gu) return;
+    list.innerHTML = "";
+    setMessage(`${gu} 불러오는 중…`);
+    try {
+      const data = await getJson(`/api/places?gu=${encodeURIComponent(gu)}`);
+      const rental = data.places.filter((p) => p.type === "rental").length;
+      setMessage(`${gu} · 보관소 ${data.places.length - rental}곳` + (rental ? ` · 대여소 ${rental}곳` : ""));
+      render(data.places);
+    } catch (e) {
+      setMessage(e.message, true);
+    }
+  }
+
+  // 첫 화면: 구 목록 · 데이터 기준일과 출처
+  async function init() {
+    try {
+      const data = await getJson("/api/places");
+      guSelect.insertAdjacentHTML("beforeend",
+        data.gus.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join(""));
+      $("sources").innerHTML = data.sources.map((s) =>
+        `<p>${TYPE_LABEL[s.type]} ${s.count}곳 · 기준일 ${esc(s.dataDate || "확인 필요")} · 출처: ${esc(s.name)}</p>`
+      ).join("") + "<p>보관소의 빈자리 수와 누비자 대여소는 아직 포함되지 않았습니다.</p>";
+    } catch (e) {
+      $("sources").innerHTML = `<p>${esc(e.message)}</p>`;
+    }
+  }
+
+  nearBtn.addEventListener("click", findNear);
+  guSelect.addEventListener("change", findByGu);
+  init();
+</script>
+</body>
+</html>
