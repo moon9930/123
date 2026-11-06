@@ -32,6 +32,23 @@ async function query(params) {
   return res.json();
 }
 
+// 477곳 전체를 한 번 읽어 10분 동안 기억해 둔다(캐시).
+// 데이터는 1년에 한 번 정도 바뀌므로, 매 요청마다 Supabase에 다녀올 필요가 없다.
+// 첫 화면이 열릴 때 /api/places가 불리므로, 버튼을 누를 때쯤에는 이미 기억된 상태다.
+const CACHE_MS = 10 * 60 * 1000;
+let cache = { rows: null, at: 0, loading: null };
+
+async function allRows() {
+  if (cache.rows && Date.now() - cache.at < CACHE_MS) return cache.rows;
+  if (!cache.loading) {
+    // 동시에 여러 요청이 와도 Supabase는 한 번만 부른다
+    cache.loading = query(`select=${COLUMNS}&limit=5000`)
+      .then((rows) => { cache = { rows, at: Date.now(), loading: null }; return rows; })
+      .catch((err) => { cache.loading = null; throw err; });
+  }
+  return cache.loading;
+}
+
 const num = (v) => (v == null || v === "" ? null : Number(v));
 
 // 화면에 보낼 모양으로 바꾼다
@@ -72,11 +89,11 @@ export default async function handler(req, res) {
     const q = req.query || {};
     const now = nowInSeoul();
 
-    // 위치로 찾기: 477곳뿐이라 전부 읽어 거리를 재고 가까운 10곳만 보낸다
+    // 위치로 찾기: 477곳뿐이라 전부(기억해 둔 것) 거리를 재고 가까운 10곳만 보낸다
     if (q.lat !== undefined || q.lng !== undefined) {
       const from = readPoint(q);
       if (!from) return res.status(400).json({ error: "위치 값이 올바르지 않습니다." });
-      const rows = await query(`select=${COLUMNS}&limit=5000`);
+      const rows = await allRows();
       const places = rows
         .map((r) => toPlace(r, now, from))
         .sort((a, b) => a.distance - b.distance)
@@ -89,13 +106,15 @@ export default async function handler(req, res) {
     if (q.gu !== undefined) {
       const gu = String(q.gu).trim();
       if (!GUS.includes(gu)) return res.status(400).json({ error: "구 이름이 올바르지 않습니다." });
-      const rows = await query(`select=${COLUMNS}&gu=eq.${encodeURIComponent(gu)}&order=name.asc&limit=5000`);
+      const rows = (await allRows())
+        .filter((r) => r.gu === gu)
+        .sort((a, b) => a.name.localeCompare(b.name, "ko"));
       res.setHeader("Cache-Control", "s-maxage=600");
       return res.status(200).json({ mode: "gu", gu, places: rows.map((r) => toPlace(r, now)) });
     }
 
     // 첫 화면용: 구 목록 + 원본별 곳 수 · 기준일 · 출처
-    const rows = await query("select=type,service,racks,data_date&limit=5000");
+    const rows = await allRows();
     const sources = SOURCES.map(({ key, label, name, match, dateOf }) => {
       const mine = rows.filter(match);
       const dates = mine.map((r) => (dateOf ? dateOf(r) : r.data_date)).filter(Boolean).sort();
