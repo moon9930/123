@@ -16,12 +16,30 @@ if (sampleMode) {
   process.env.SUPABASE_SECRET_KEY = "sample";
 }
 
-// Supabase 조회 흉내: select · gu=eq.○○ · order · limit만 지원 (CSV에 따옴표 값은 없음)
+// CSV 한 줄을 칸으로 나눈다 ("따옴표, 안의 쉼표"도 처리)
+function splitCsvLine(line) {
+  const cells = [];
+  let cell = "", quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") { cells.push(cell); cell = ""; }
+    else cell += c;
+  }
+  cells.push(cell);
+  return cells;
+}
+
+// Supabase 조회 흉내: select · gu=eq.○○ · order · limit만 지원
 function sampleQuery(params) {
   const [header, ...lines] = fs.readFileSync("data/stations_utf8.csv", "utf8").trim().split(/\r?\n/);
   const cols = header.split(",");
   let rows = lines.map((line) => {
-    const v = line.split(",");
+    const v = splitCsvLine(line);
     return Object.fromEntries(cols.map((c, i) => [c, v[i] === "" || v[i] === undefined ? null : v[i]]));
   });
   const gu = params.get("gu");

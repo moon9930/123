@@ -1,7 +1,7 @@
 # 창원 자전거 보관소·대여소 찾기 · 3주차 PoC
 
 내 위치(또는 구)를 고르면 가까운 자전거 보관소·대여소를 거리순으로 보여 줍니다.
-지금 데이터: 보관소 283곳 + 대여소 1곳 (누비자 대여소는 위치 파일을 받으면 추가)
+지금 데이터: 477곳 = 누비자 터미널 454 (그중 261곳은 같은 자리 보관소 합침) + 보관소만 22 + 기타 대여소 1
 
 ## 내 PC에서 실행
 ```
@@ -12,7 +12,7 @@ npm run dev
 ## 배포 순서
 1. Supabase SQL Editor에서 `supabase/schema.sql` 실행 (RLS 켬)
 2. Table Editor → bike_places → Insert → Import data from CSV → `data/stations_utf8.csv`
-3. "테이블 행 수가 원본 파일 행 수(284)와 같은지 확인해줘"
+3. "테이블 행 수가 stations_utf8.csv 행 수(477)와 같은지 확인해줘"
 4. `.env.example`을 복사해 `.env`를 만들고 메모장으로 `SUPABASE_URL`, `SUPABASE_SECRET_KEY` 입력
 5. GitHub에 올리기 (`.env` 제외 · `.gitignore` 확인)
 6. vercel.com → Add New… → Project → 저장소 Import → Environment Variables에 `SUPABASE_URL`, `SUPABASE_SECRET_KEY` → Deploy
@@ -26,7 +26,7 @@ npm run dev
 | `lib/distance.js` | 두 지점 사이 거리(m) |
 | `lib/rental-status.js` | 대여소 휴무 기간·운영 시간 판단 (한국 시간) |
 | `supabase/schema.sql` | bike_places 테이블 · RLS |
-| `data/` | 원본 CSV 2개 · 합친 사본 `stations_utf8.csv` |
+| `data/` | 원본 3개 · 합친 사본 `stations_utf8.csv` (합친 규칙은 data/README.md) |
 
 ## 막히면
 | 증상 | 확인 |

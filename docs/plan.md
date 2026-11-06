@@ -25,7 +25,7 @@ data/stations_utf8.csv → Supabase bike_places 테이블 (RLS 켬)
 ```
 
 - **Supabase에 넣는 이유**: 연 1회 수준으로 바뀌는 CSV라 API를 매번 부를 필요가 없다. 누비자 대여소를 받으면 같은 테이블에 `type = rental` 행만 추가하면 된다.
-- **거리 계산은 서버 함수에서**: 284곳뿐이라 전부 읽어 거리를 재고 가까운 10곳을 고른다 (`lib/distance.js`).
+- **거리 계산은 서버 함수에서**: 477곳뿐이라 전부 읽어 거리를 재고 가까운 10곳을 고른다 (`lib/distance.js`).
 - **대여소 휴무 기간 판단도 서버 함수에서** 한국 시간 기준으로 (`lib/rental-status.js`).
 - 화면은 Supabase를 직접 부르지 않는다. `SUPABASE_SECRET_KEY`는 서버 함수에서만 쓴다.
 

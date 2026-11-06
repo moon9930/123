@@ -1,19 +1,25 @@
 // GET /api/places                       → { gus: [...], sources: [...] }        (구 목록 · 데이터 기준일)
 // GET /api/places?lat=35.22&lng=128.68  → { mode: "near", places: [...10곳] } (가까운 순)
-// GET /api/places?gu=성산구              → { mode: "gu", places: [...] }       (그 구 전체, 이름순)
+// GET /api/places?gu=성산구              → { mode: "gu", places: [...] }       (그 구 전체)
 // 키는 서버에서만 읽는다(.env / Vercel 환경 변수). 화면 코드에는 키가 없다.
 import { distanceMeters } from "../lib/distance.js";
 import { rentalStatus, nowInSeoul } from "../lib/rental-status.js";
 
 const TABLE = "bike_places";
 const COLUMNS =
-  "id,type,name,road_address,jibun_address,gu,lat,lng,capacity,data_date,open_time,close_time,closed_days,fee";
+  "id,type,service,name,address,gu,lat,lng,racks,bikes,terminal_no,data_date,open_time,close_time,closed_days,fee";
 const NEAR_COUNT = 10;
 const GUS = ["의창구", "성산구", "마산합포구", "마산회원구", "진해구"];
-const SOURCES = {
-  storage: "자전거보관소정보_경남창원시 (창원시 환경정책과)",
-  rental: "전국자전거대여소표준데이터 (공공데이터포털)",
-};
+
+// 화면 아래 출처: 어떤 행이 어느 원본에서 왔는지
+const SOURCES = [
+  { key: "nubija", label: "누비자 터미널", name: "경상남도 창원시_누비자 터미널 (2025년)",
+    match: (r) => r.service === "nubija" },
+  { key: "storage", label: "자전거 보관소", name: "자전거보관소정보_경남창원시 (창원시 환경정책과)",
+    match: (r) => r.racks != null, dateOf: (r) => (r.type === "storage" ? r.data_date : null) },
+  { key: "rental", label: "기타 대여소", name: "전국자전거대여소표준데이터 (공공데이터포털)",
+    match: (r) => r.type === "rental" && r.service !== "nubija" },
+];
 
 async function query(params) {
   const url = process.env.SUPABASE_URL;
@@ -26,22 +32,26 @@ async function query(params) {
   return res.json();
 }
 
-// 화면에 보낼 모양으로 바꾼다 (대여소는 지금 상태를 붙인다)
+const num = (v) => (v == null || v === "" ? null : Number(v));
+
+// 화면에 보낼 모양으로 바꾼다
 function toPlace(r, now, from) {
   const place = {
     id: r.id,
     type: r.type,
+    service: r.service || null,
     name: r.name,
-    address: r.road_address || r.jibun_address,
+    address: r.address,
     gu: r.gu,
     lat: Number(r.lat),
     lng: Number(r.lng),
-    capacity: r.capacity == null ? null : Number(r.capacity),
+    racks: num(r.racks),
+    bikes: num(r.bikes),
+    terminalNo: r.terminal_no || null,
   };
-  if (r.type === "rental") {
+  if (r.open_time || r.closed_days) {
     place.hours = r.open_time && r.close_time ? `${r.open_time}~${r.close_time}` : null;
     place.fee = r.fee || null;
-    place.closedDays = r.closed_days || null;
     place.status = rentalStatus(r, now);
   }
   if (from) place.distance = Math.round(distanceMeters(from.lat, from.lng, place.lat, place.lng));
@@ -62,7 +72,7 @@ export default async function handler(req, res) {
     const q = req.query || {};
     const now = nowInSeoul();
 
-    // 위치로 찾기: 284곳뿐이라 전부 읽어 거리를 재고 가까운 10곳만 보낸다
+    // 위치로 찾기: 477곳뿐이라 전부 읽어 거리를 재고 가까운 10곳만 보낸다
     if (q.lat !== undefined || q.lng !== undefined) {
       const from = readPoint(q);
       if (!from) return res.status(400).json({ error: "위치 값이 올바르지 않습니다." });
@@ -75,25 +85,21 @@ export default async function handler(req, res) {
       return res.status(200).json({ mode: "near", places });
     }
 
-    // 구로 찾기
+    // 구로 찾기 (이름순)
     if (q.gu !== undefined) {
       const gu = String(q.gu).trim();
       if (!GUS.includes(gu)) return res.status(400).json({ error: "구 이름이 올바르지 않습니다." });
       const rows = await query(`select=${COLUMNS}&gu=eq.${encodeURIComponent(gu)}&order=name.asc&limit=5000`);
-      // 대여소를 먼저, 그다음 보관소 이름순
-      const places = rows
-        .map((r) => toPlace(r, now))
-        .sort((a, b) => (a.type === b.type ? 0 : a.type === "rental" ? -1 : 1));
       res.setHeader("Cache-Control", "s-maxage=600");
-      return res.status(200).json({ mode: "gu", gu, places });
+      return res.status(200).json({ mode: "gu", gu, places: rows.map((r) => toPlace(r, now)) });
     }
 
-    // 첫 화면용: 구 목록 + 데이터별 기준일 · 출처
-    const rows = await query("select=type,data_date&limit=5000");
-    const sources = Object.entries(SOURCES).map(([type, name]) => {
-      const mine = rows.filter((r) => r.type === type);
-      const dataDate = mine.map((r) => r.data_date).filter(Boolean).sort().pop() || null;
-      return { type, name, count: mine.length, dataDate };
+    // 첫 화면용: 구 목록 + 원본별 곳 수 · 기준일 · 출처
+    const rows = await query("select=type,service,racks,data_date&limit=5000");
+    const sources = SOURCES.map(({ key, label, name, match, dateOf }) => {
+      const mine = rows.filter(match);
+      const dates = mine.map((r) => (dateOf ? dateOf(r) : r.data_date)).filter(Boolean).sort();
+      return { key, label, name, count: mine.length, dataDate: dates.pop() || null };
     });
     res.setHeader("Cache-Control", "s-maxage=3600");
     return res.status(200).json({ gus: GUS, sources });

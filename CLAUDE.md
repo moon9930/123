@@ -9,9 +9,9 @@
 - 실패 항목은 한 번에 하나만 고친다.
 
 ## 프로젝트
-- 창원 자전거 대여소·보관소 찾기: 내 위치(또는 구 선택) → 가까운 보관소·대여소 거리순 목록
-- 지금은 보관소 283곳 + 대여소 1곳 (누비자 대여소는 터미널 위치 파일을 받으면 `type = rental`로 추가)
-- 데이터: data/stations_utf8.csv (원본 CSV 2개는 EUC-KR, 수정 금지)
+- 창원 자전거 대여소·보관소 찾기: 내 위치(또는 구 선택) → 가까운 대여소·보관소 거리순 목록
+- 데이터 477곳: 누비자 터미널 454 (그중 261곳은 50m 안 보관소를 합침) + 보관소만 22 + 기타 대여소 1
+- 데이터: data/stations_utf8.csv (원본 3개 · 합친 규칙은 data/README.md, 원본 수정 금지)
 - 구조: index.html · api/places.js · lib/distance.js · lib/rental-status.js · supabase/schema.sql · data/
 - 따로 만든 게임(PRD 밖, 건드리지 않음): tower-defense.html · lotto.html · api/commentary.js
 - 문서: PRD.md · docs/plan.md · docs/learning.md · docs/poc.md · docs/todo.md

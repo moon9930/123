@@ -83,7 +83,6 @@
   // 화면은 Supabase를 직접 부르지 않는다: 화면 → /api/places → Supabase
   const $ = (id) => document.getElementById(id);
   const nearBtn = $("nearBtn"), guSelect = $("gu"), message = $("message"), list = $("list");
-  const TYPE_LABEL = { storage: "보관소", rental: "대여소" };
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -104,21 +103,27 @@
     return body;
   }
 
+  // 한 장소에 대여소·보관소가 함께 있으면 표시도 둘 다 붙인다
+  function tags(p) {
+    const t = [];
+    if (p.type === "rental") t.push(`<span class="tag rental">${p.service === "nubija" ? "누비자 대여소" : "대여소"}</span>`);
+    if (p.racks != null) t.push('<span class="tag storage">보관소</span>');
+    return t.join("");
+  }
+
   function render(places) {
     list.innerHTML = places.map((p) => {
       const lines = [];
-      if (p.type === "storage") {
-        lines.push(`보관대수 ${p.capacity ?? "확인 필요"}대`);
-      } else {
-        lines.push(`보유 자전거 ${p.capacity ?? "확인 필요"}대`);
-        if (p.hours) lines.push(`운영 ${p.hours}`);
-        if (p.fee) lines.push(`요금 ${p.fee}`);
-      }
+      if (p.terminalNo) lines.push(`터미널 ${p.terminalNo}번`);
+      if (p.racks != null) lines.push(`보관대 ${p.racks}대`);
+      if (p.bikes != null) lines.push(`보유 자전거 ${p.bikes}대`);
+      if (p.hours) lines.push(`운영 ${p.hours}`);
+      if (p.fee) lines.push(`요금 ${p.fee}`);
       const status = p.status
         ? `<span class="status ${p.status.status === "open" ? "open" : ""}">${esc(p.status.label)}</span><br>` : "";
       return `<li>
         <div class="top">
-          <span class="tag ${p.type}">${TYPE_LABEL[p.type] || p.type}</span>
+          ${tags(p)}
           <span class="name">${esc(p.name)}</span>
           ${p.distance != null ? `<span class="dist">${formatDistance(p.distance)}</span>` : ""}
         </div>
@@ -178,7 +183,8 @@
     try {
       const data = await getJson(`/api/places?gu=${encodeURIComponent(gu)}`);
       const rental = data.places.filter((p) => p.type === "rental").length;
-      setMessage(`${gu} · 보관소 ${data.places.length - rental}곳` + (rental ? ` · 대여소 ${rental}곳` : ""));
+      const storage = data.places.filter((p) => p.racks != null).length;
+      setMessage(`${gu} · ${data.places.length}곳 (대여소 ${rental} · 보관소 ${storage}, 겹치는 곳 포함)`);
       render(data.places);
     } catch (e) {
       setMessage(e.message, true);
@@ -192,8 +198,9 @@
       guSelect.insertAdjacentHTML("beforeend",
         data.gus.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join(""));
       $("sources").innerHTML = data.sources.map((s) =>
-        `<p>${TYPE_LABEL[s.type]} ${s.count}곳 · 기준일 ${esc(s.dataDate || "확인 필요")} · 출처: ${esc(s.name)}</p>`
-      ).join("") + "<p>보관소의 빈자리 수와 누비자 대여소는 아직 포함되지 않았습니다.</p>";
+        `<p>${esc(s.label)} ${s.count}곳 · 기준일 ${esc(s.dataDate || "확인 필요")} · 출처: ${esc(s.name)}</p>`
+      ).join("") +
+        "<p>누비자 터미널과 50m 안에 있는 보관소는 한 곳으로 합쳐 보여 줍니다. 실시간 대여 가능 대수와 보관소 빈자리는 포함되지 않았습니다.</p>";
     } catch (e) {
       $("sources").innerHTML = `<p>${esc(e.message)}</p>`;
     }
