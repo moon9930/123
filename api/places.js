@@ -96,6 +96,8 @@ function slopesNear(place, slopes) {
       rating: s.rating || null,
       designated: s.designation === "여",
       distance: Math.round(d / 10) * 10, // 좌표가 거칠어 10m 단위로
+      lat: Number(s.lat),
+      lng: Number(s.lng),
     })),
   };
 }

@@ -22,7 +22,7 @@ npm run dev
 ## 구조
 | 파일 | 역할 |
 |---|---|
-| `index.html` | 화면 (위치 버튼 · 구 선택 · 목록 · 출처) |
+| `index.html` | 화면 (위치 버튼 · 구 선택 · 지도(Leaflet + OpenStreetMap) · 목록 · 출처) |
 | `api/places.js` | 위치 → 가까운 10곳 / 구 → 전체 / 구 목록·기준일 |
 | `lib/distance.js` | 두 지점 사이 거리(m) |
 | `lib/rental-status.js` | 대여소 휴무 기간·운영 시간 판단 (한국 시간) |

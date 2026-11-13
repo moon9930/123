@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>창원 자전거 보관소·대여소 찾기</title>
+<!-- 지도: Leaflet + OpenStreetMap (키 필요 없음) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <style>
   :root {
     --bg: #f2f5f3; --surface: #ffffff; --ink: #15241d; --muted: #5a6b62; --line: #d5dfd9;
@@ -53,7 +56,19 @@
   .meta { color: var(--muted); font-size: .95rem; margin-top: 4px; }
   .status { display: inline-block; margin-top: 6px; font-size: .9rem; font-weight: 700; color: var(--warn); }
   .status.open { color: var(--accent); }
-  .map { display: inline-block; margin-top: 8px; font-size: .95rem; color: var(--accent); font-weight: 700; }
+  .map { display: inline-block; margin-top: 8px; font-size: .95rem; color: var(--accent); font-weight: 700;
+    background: none; border: 0; padding: 0; min-height: 0; cursor: pointer; text-decoration: underline; }
+  #mapWrap { margin-bottom: 14px; }
+  #map { height: 320px; border: 1px solid var(--line); border-radius: 12px; z-index: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; color: var(--muted); margin-top: 6px; }
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.25); vertical-align: -1px; margin-right: 4px; }
+  .tri { color: #c62828; margin-right: 4px; }
+  .slope-icon { color: #c62828; font-size: 16px; line-height: 16px; text-align: center;
+    text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+  .leaflet-popup-content { font-size: 14px; line-height: 1.45; margin: 10px 12px; }
+  .leaflet-popup-content b { font-size: 15px; }
+  .leaflet-popup-content a { color: #13795b; font-weight: 700; }
   .slope { margin-top: 8px; font-size: .9rem; }
   .slope summary { cursor: pointer; font-weight: 700; color: var(--warn); }
   .slope.none { color: var(--muted); }
@@ -73,7 +88,7 @@
 <body>
 <main>
   <h1>창원 자전거 보관소·대여소 찾기</h1>
-  <p class="lead">가까운 자전거 보관소와 대여소를 찾아 드려요.</p>
+  <p class="lead">가까운 자전거 보관소와 대여소를 지도와 목록으로 찾아 드려요.</p>
 
   <div class="controls">
     <button id="nearBtn" type="button">📍 내 위치로 찾기</button>
@@ -84,6 +99,15 @@
   </div>
 
   <p id="message" role="status" aria-live="polite"></p>
+  <div id="mapWrap" hidden>
+    <div id="map" role="region" aria-label="검색 결과 지도"></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--rental)"></span>대여소</span>
+      <span><span class="dot" style="background:var(--storage)"></span>보관소만</span>
+      <span><span class="dot" style="background:var(--accent)"></span>내 위치</span>
+      <span><span class="tri">▲</span>급경사지</span>
+    </div>
+  </div>
   <ul id="list"></ul>
   <div id="roads"></div>
 
@@ -153,7 +177,84 @@
   }
   const shortAddr = (a) => String(a || "").replace(/^(경상남도|경남)\s*창원시\s*/, "");
 
-  function render(places) {
+  // ── 화면 안 지도 (Leaflet + OpenStreetMap) ──────────────────────────
+  let map = null, layer = null, markers = {}, shown = [];
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const slopeIcon = () => L.divIcon({ className: "slope-icon", html: "▲", iconSize: [16, 16] });
+
+  function ensureMap() {
+    if (!window.L) return null; // 지도 파일을 못 불러오면 지도 없이 목록만
+    $("mapWrap").hidden = false;
+    if (!map) {
+      map = L.map("map", { scrollWheelZoom: false });
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(map);
+      layer = L.layerGroup().addTo(map);
+    }
+    return map;
+  }
+
+  function popupHtml(p) {
+    const kind = [p.type === "rental" ? (p.service === "nubija" ? "누비자 대여소" : "대여소") : "",
+      p.racks != null ? `보관대 ${p.racks}대` : ""].filter(Boolean).join(" · ");
+    return `<b>${esc(p.name)}</b><br>${esc(kind)}${p.distance != null ? ` · ${formatDistance(p.distance)}` : ""}<br>
+      <span>${esc(p.address)}</span><br>
+      <a href="${mapLink(p)}" target="_blank" rel="noopener">길찾기 (카카오맵) ›</a>`;
+  }
+
+  // 목록에 나온 장소 · 내 위치 · 근처 급경사지를 지도에 그린다
+  function drawMap(places, me) {
+    const m = ensureMap();
+    if (!m) return;
+    layer.clearLayers();
+    markers = {};
+    const bounds = [];
+    const seenSlopes = new Set();
+    for (const p of places) {
+      for (const s of p.slopes?.items || []) {
+        const key = `${s.lat},${s.lng},${s.name}`;
+        if (seenSlopes.has(key) || !Number.isFinite(s.lat)) continue;
+        seenSlopes.add(key);
+        L.marker([s.lat, s.lng], { icon: slopeIcon(), keyboard: false })
+          .bindPopup(`<b>⚠️ ${esc(s.name)}</b><br>${esc(s.kind)}${s.angle != null ? ` · 경사 ${s.angle}°` : ""}${s.rating ? ` · 등급 ${esc(s.rating)}` : ""}<br><span>붕괴 위험 비탈면 · 위치 약 100m 오차</span>`)
+          .addTo(layer);
+      }
+    }
+    for (const p of places) {
+      const color = p.type === "rental" ? cssVar("--rental") : cssVar("--storage");
+      markers[p.id] = L.circleMarker([p.lat, p.lng], {
+        radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1,
+      }).bindPopup(popupHtml(p)).addTo(layer);
+      bounds.push([p.lat, p.lng]);
+    }
+    if (me) {
+      L.circleMarker(me, { radius: 8, color: "#fff", weight: 3, fillColor: cssVar("--accent"), fillOpacity: 1 })
+        .bindTooltip("내 위치").addTo(layer);
+      bounds.push(me);
+    }
+    m.invalidateSize();
+    if (bounds.length) m.fitBounds(bounds, { padding: [28, 28], maxZoom: 17 });
+  }
+
+  // 카드의 "지도에서 보기" → 위 지도에서 그 장소를 크게 보여 준다
+  function focusPlace(id) {
+    const p = shown.find((x) => x.id === id);
+    if (!p) return;
+    if (!map || !markers[id]) { window.open(mapLink(p), "_blank", "noopener"); return; } // 지도가 없으면 카카오맵
+    $("mapWrap").scrollIntoView({ behavior: "smooth", block: "start" });
+    map.setView([p.lat, p.lng], 17);
+    markers[id].openPopup();
+  }
+  list.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.map");
+    if (btn) focusPlace(btn.dataset.id);
+  });
+
+  function render(places, me) {
+    shown = places;
+    drawMap(places, me);
     $("roads").innerHTML = "";
     list.innerHTML = places.map((p) => {
       const lines = [];
@@ -174,7 +275,7 @@
         <div class="meta">${lines.map(esc).join(" · ")}</div>
         ${status}
         ${slopeBlock(p.slopes)}
-        <a class="map" href="${mapLink(p)}" target="_blank" rel="noopener">지도에서 보기 ›</a>
+        <button class="map" type="button" data-id="${esc(p.id)}">지도에서 보기 ›</button>
       </li>`;
     }).join("");
   }
@@ -202,7 +303,7 @@
           const data = await getJson(`/api/places?lat=${lat}&lng=${lng}`);
           guSelect.value = "";
           setMessage(`내 위치에서 가까운 ${data.places.length}곳`);
-          render(data.places);
+          render(data.places, [pos.coords.latitude, pos.coords.longitude]);
         } catch (e) {
           setMessage(e.message, true, true);
         } finally {
