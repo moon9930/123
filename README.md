@@ -23,6 +23,8 @@ npm run dev
 | 파일 | 역할 |
 |---|---|
 | `index.html` | 화면 (위치 버튼 · 구 선택 · 지도(Leaflet + OpenStreetMap) · 목록 · 출처) |
+| `api/route.js` | 자전거 길찾기 (OpenStreetMap 자전거 경로 + 자전거도로 이름 맞추기 + 경로 근처 급경사지) |
+| `lib/data.js` | Supabase 세 테이블 읽기 · 10분 캐시 (places · route가 함께 씀) |
 | `api/places.js` | 위치 → 가까운 10곳 / 구 → 전체 / 구 목록·기준일 |
 | `lib/distance.js` | 두 지점 사이 거리(m) |
 | `lib/rental-status.js` | 대여소 휴무 기간·운영 시간 판단 (한국 시간) |

@@ -64,11 +64,29 @@
   .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #fff;
     box-shadow: 0 0 0 1px rgba(0,0,0,.25); vertical-align: -1px; margin-right: 4px; }
   .tri { color: #c62828; margin-right: 4px; }
+  .line-swatch { display: inline-block; width: 18px; height: 5px; border-radius: 3px; background: #6a3fd1;
+    vertical-align: 3px; margin-right: 4px; }
   .slope-icon { color: #c62828; font-size: 16px; line-height: 16px; text-align: center;
     text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
   .leaflet-popup-content { font-size: 14px; line-height: 1.45; margin: 10px 12px; }
   .leaflet-popup-content b { font-size: 15px; }
   .leaflet-popup-content a { color: #13795b; font-weight: 700; }
+  .leaflet-popup-content .route-btn { margin-top: 6px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+  .route-btn { display: inline-block; margin-top: 8px; font: inherit; font-size: .95rem; font-weight: 700;
+    color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 8px;
+    padding: 6px 12px; min-height: 36px; cursor: pointer; }
+  .route-btn:disabled { opacity: .6; cursor: wait; }
+  #routeBox { background: var(--surface); border: 2px solid var(--accent); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 14px; font-size: .95rem; }
+  #routeBox .rhead { display: flex; align-items: baseline; gap: 8px; }
+  #routeBox .rtitle { font-weight: 700; }
+  #routeBox .close { margin-left: auto; background: none; border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; min-height: 32px; padding: 0 10px; cursor: pointer; font: inherit; font-size: .85rem; }
+  #routeBox .big { font-size: 1.15rem; font-weight: 700; color: var(--accent); margin: 4px 0; }
+  #routeBox p { margin: 4px 0; }
+  #routeBox .warnline { color: var(--warn); font-weight: 700; }
+  #routeBox .note { color: var(--muted); font-size: .82rem; margin-top: 8px; }
   .slope { margin-top: 8px; font-size: .9rem; }
   .slope summary { cursor: pointer; font-weight: 700; color: var(--warn); }
   .slope.none { color: var(--muted); }
@@ -106,8 +124,10 @@
       <span><span class="dot" style="background:var(--storage)"></span>보관소만</span>
       <span><span class="dot" style="background:var(--accent)"></span>내 위치</span>
       <span><span class="tri">▲</span>급경사지</span>
+      <span><span class="line-swatch"></span>자전거 경로</span>
     </div>
   </div>
+  <div id="routeBox" hidden aria-live="polite"></div>
   <ul id="list"></ul>
   <div id="roads"></div>
 
@@ -201,7 +221,8 @@
       p.racks != null ? `보관대 ${p.racks}대` : ""].filter(Boolean).join(" · ");
     return `<b>${esc(p.name)}</b><br>${esc(kind)}${p.distance != null ? ` · ${formatDistance(p.distance)}` : ""}<br>
       <span>${esc(p.address)}</span><br>
-      <a href="${mapLink(p)}" target="_blank" rel="noopener">길찾기 (카카오맵) ›</a>`;
+      <button class="route-btn" type="button" data-route="${esc(p.id)}">🚲 자전거 길찾기</button><br>
+      <a href="${mapLink(p)}" target="_blank" rel="noopener">카카오맵에서 보기 ›</a>`;
   }
 
   // 목록에 나온 장소 · 내 위치 · 근처 급경사지를 지도에 그린다
@@ -247,13 +268,106 @@
     map.setView([p.lat, p.lng], 17);
     markers[id].openPopup();
   }
-  list.addEventListener("click", (e) => {
-    const btn = e.target.closest("button.map");
-    if (btn) focusPlace(btn.dataset.id);
+  // ── 자전거 길찾기: 내 위치 → 고른 장소 (경로: OpenStreetMap 자전거 길찾기) ──
+  let myPos = null, routeLayer = null;
+
+  function getMyPos() {
+    return new Promise((resolve, reject) => {
+      if (myPos) return resolve(myPos);
+      if (!("geolocation" in navigator)) return reject(new Error("이 브라우저는 위치를 지원하지 않아요."));
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve((myPos = [pos.coords.latitude, pos.coords.longitude])),
+        (err) => reject(new Error(err.code === 1
+          ? "길찾기는 출발지(내 위치)가 필요해요. 브라우저에서 위치를 허용해 주세요."
+          : "지금 위치를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.")),
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+      );
+    });
+  }
+
+  const fmtMin = (sec) => (sec < 3600 ? `${Math.max(1, Math.round(sec / 60))}분` : `${Math.floor(sec / 3600)}시간 ${Math.round((sec % 3600) / 60)}분`);
+
+  function clearRoute() {
+    if (routeLayer) routeLayer.clearLayers();
+    $("routeBox").hidden = true;
+    $("routeBox").innerHTML = "";
+  }
+
+  async function startRoute(id, btn) {
+    const p = shown.find((x) => x.id === id);
+    if (!p) return;
+    const box = $("routeBox");
+    if (btn) btn.disabled = true;
+    box.hidden = false;
+    box.innerHTML = `<p>🚲 <b>${esc(p.name)}</b>까지 자전거 경로를 찾는 중…</p>`;
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    try {
+      const me = await getMyPos();
+      const q = `from=${me[0].toFixed(5)},${me[1].toFixed(5)}&to=${p.lat},${p.lng}`;
+      const r = await getJson(`/api/route?${q}`);
+      drawRoute(r, me, p);
+      box.innerHTML = routeSummary(r, p);
+      box.querySelector(".close").onclick = clearRoute;
+      $("mapWrap").scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) {
+      box.innerHTML = `<p class="warnline">${esc(e.message)}</p>`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function drawRoute(r, me, p) {
+    const m = ensureMap();
+    if (!m) return;
+    if (!routeLayer) routeLayer = L.layerGroup().addTo(m);
+    routeLayer.clearLayers();
+    L.polyline(r.line, { color: "#ffffff", weight: 9, opacity: .9 }).addTo(routeLayer);
+    const pl = L.polyline(r.line, { color: "#6a3fd1", weight: 5 }).addTo(routeLayer);
+    L.circleMarker(me, { radius: 8, color: "#fff", weight: 3, fillColor: cssVar("--accent"), fillOpacity: 1 })
+      .bindTooltip("출발 (내 위치)").addTo(routeLayer);
+    for (const s of r.slopes?.items || []) {
+      L.marker([s.lat, s.lng], { icon: slopeIcon(), keyboard: false })
+        .bindPopup(`<b>⚠️ ${esc(s.name)}</b><br>${esc(s.kind)}${s.angle != null ? ` · 경사 ${s.angle}°` : ""}<br><span>경로 근처 붕괴 위험 비탈면</span>`)
+        .addTo(routeLayer);
+    }
+    m.closePopup(); // 말풍선이 경로를 가리지 않게
+    m.fitBounds(pl.getBounds(), { padding: [28, 28] });
+    L.circleMarker([p.lat, p.lng], { radius: 10, color: "#6a3fd1", weight: 3, fill: false })
+      .bindTooltip(`도착: ${esc(p.name)}`).addTo(routeLayer);
+  }
+
+  function routeSummary(r, p) {
+    const km = (r.distance / 1000).toFixed(1);
+    const share = r.distance ? Math.round((r.onBikeRoadM / r.distance) * 100) : 0;
+    const top = r.bikeRoads.slice(0, 5);
+    const more = r.bikeRoads.length - top.length;
+    const roads = r.bikeRoads.length
+      ? `<p>🛣️ 자전거도로가 있는 길로 약 <b>${(r.onBikeRoadM / 1000).toFixed(1)}km</b> (전체의 ${share}%)</p>
+         <p>${top.map((b) => `<b title="${esc(b.types.join(" · "))}">${esc(b.name)}</b> ${(b.meters / 1000).toFixed(1)}km`).join(" · ")}${more > 0 ? ` 외 ${more}곳` : ""}</p>`
+      : r.bikeRoadsLoaded
+        ? "<p>🛣️ 이 경로에는 창원시 자전거도로 목록에 있는 길이 없어요.</p>"
+        : "";
+    const slopes = r.slopes?.count
+      ? `<p class="warnline">⚠️ 경로 100m 안 급경사지 ${r.slopes.count}곳${r.slopes.maxAngle != null ? ` · 최대 경사 ${r.slopes.maxAngle}°` : ""}</p>`
+      : "";
+    return `<div class="rhead"><span class="rtitle">🚲 내 위치 → ${esc(p.name)}</span>
+        <button class="close" type="button">경로 닫기</button></div>
+      <div class="big">${km}km · 자전거 약 ${fmtMin(r.duration)}</div>
+      ${roads}${slopes}
+      <p class="note">경로: OpenStreetMap 자전거 길찾기(FOSSGIS). 자전거도로 여부는 길 이름으로 창원시 자전거도로 목록과 맞춘 것이라, 실제 차로·인도 구분은 현장에서 확인하세요.</p>`;
+  }
+
+  // 카드 · 지도 말풍선의 버튼 (한 곳에서 처리)
+  document.addEventListener("click", (e) => {
+    const routeBtn = e.target.closest("button.route-btn");
+    if (routeBtn) return startRoute(routeBtn.dataset.route, routeBtn);
+    const mapBtn = e.target.closest("#list button.map");
+    if (mapBtn) focusPlace(mapBtn.dataset.id);
   });
 
   function render(places, me) {
     shown = places;
+    clearRoute();
     drawMap(places, me);
     $("roads").innerHTML = "";
     list.innerHTML = places.map((p) => {
@@ -275,7 +389,10 @@
         <div class="meta">${lines.map(esc).join(" · ")}</div>
         ${status}
         ${slopeBlock(p.slopes)}
-        <button class="map" type="button" data-id="${esc(p.id)}">지도에서 보기 ›</button>
+        <div class="actions">
+          <button class="route-btn" type="button" data-route="${esc(p.id)}">🚲 자전거 길찾기</button>
+          <button class="map" type="button" data-id="${esc(p.id)}">지도에서 보기 ›</button>
+        </div>
       </li>`;
     }).join("");
   }
@@ -303,7 +420,8 @@
           const data = await getJson(`/api/places?lat=${lat}&lng=${lng}`);
           guSelect.value = "";
           setMessage(`내 위치에서 가까운 ${data.places.length}곳`);
-          render(data.places, [pos.coords.latitude, pos.coords.longitude]);
+          myPos = [pos.coords.latitude, pos.coords.longitude]; // 길찾기 출발지로도 쓴다
+          render(data.places, myPos);
         } catch (e) {
           setMessage(e.message, true, true);
         } finally {

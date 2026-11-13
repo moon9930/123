@@ -1,10 +1,14 @@
 // 내 PC에서 확인용 서버: npm run dev → http://localhost:3000
-// index.html을 보여 주고, /api/places는 Vercel과 똑같이 api/places.js가 처리한다.
+// index.html을 보여 주고, /api/places · /api/route는 Vercel과 똑같이 api/ 파일이 처리한다.
 // .env에 Supabase 키가 있으면 Supabase를, 없으면 data/의 CSV를 쓴다.
 // 키가 있어도 CSV로 확인하고 싶으면: npm run dev:csv
 import http from "node:http";
 import fs from "node:fs";
-import handler from "./api/places.js";
+import places from "./api/places.js";
+import route from "./api/route.js";
+
+// Vercel처럼 api/ 파일 이름이 주소가 된다
+const API = { "/api/places": places, "/api/route": route };
 
 const PORT = Number(process.env.PORT) || 3000;
 const SAMPLE_PREFIX = "/_sample/rest/v1/";
@@ -67,7 +71,8 @@ http.createServer(async (req, res) => {
     return res.end(JSON.stringify(sampleQuery(file, url.searchParams)));
   }
 
-  if (url.pathname === "/api/places") {
+  const api = API[url.pathname];
+  if (api) {
     // Vercel의 req.query · res.status().json() 모양을 맞춰 준다
     req.query = Object.fromEntries(url.searchParams);
     res.status = (code) => { res.statusCode = code; return res; };
@@ -75,7 +80,7 @@ http.createServer(async (req, res) => {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.end(JSON.stringify(body));
     };
-    return handler(req, res);
+    return api(req, res);
   }
 
   if (url.pathname === "/" || url.pathname === "/index.html") {
