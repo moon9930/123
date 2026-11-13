@@ -38,9 +38,9 @@ create table if not exists public.bike_slopes (
   slope_rescue   text,               -- 구조 (석축 · 옹벽 · 토사 …)
   rating         text,               -- 등급 (A · B · C)
   designation    text,               -- 지정여부 (여 · 부)
-  slope_length   integer,            -- 길이 (m)
-  slope_height   integer,            -- 높이 (m)
-  slope_angle    integer,            -- 경사 (°)
+  slope_length   numeric,            -- 길이 (m)
+  slope_height   numeric,            -- 높이 (m) · 8.7처럼 소수가 있음
+  slope_angle    numeric,            -- 경사 (°)
   addrs          text,               -- 주소
   gu             text,               -- 구
   lat            double precision,   -- 위도
