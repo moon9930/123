@@ -54,6 +54,18 @@
   .status { display: inline-block; margin-top: 6px; font-size: .9rem; font-weight: 700; color: var(--warn); }
   .status.open { color: var(--accent); }
   .map { display: inline-block; margin-top: 8px; font-size: .95rem; color: var(--accent); font-weight: 700; }
+  .slope { margin-top: 8px; font-size: .9rem; }
+  .slope summary { cursor: pointer; font-weight: 700; color: var(--warn); }
+  .slope.none { color: var(--muted); }
+  .slope ul { margin: 6px 0 0; padding-left: 0; }
+  .slope li, .roads li { border: 0; border-radius: 0; padding: 6px 0; margin: 0; background: none;
+    border-top: 1px dashed var(--line); }
+  .slope .note, .roads .note { color: var(--muted); font-size: .85rem; margin: 6px 0 0; }
+  .roads { margin-top: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .roads summary { cursor: pointer; font-weight: 700; }
+  .roads ul { margin-top: 8px; }
+  .roads .rname { font-weight: 700; }
+  .roads .meta { margin-top: 2px; }
   footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
   footer p { margin: 0 0 4px; }
 </style>
@@ -73,6 +85,7 @@
 
   <p id="message" role="status" aria-live="polite"></p>
   <ul id="list"></ul>
+  <div id="roads"></div>
 
   <footer id="sources">
     <p>데이터 출처를 불러오는 중…</p>
@@ -111,7 +124,37 @@
     return t.join("");
   }
 
+  // 300m 안 급경사지(붕괴 위험 비탈면) 요약 · 눌러서 자세히
+  function slopeBlock(s) {
+    if (!s || !s.count) return ""; // 없으면 카드를 깔끔하게 둔다 (화면 아래 안내 참고)
+    const head = `⚠️ 300m 안 급경사지 ${s.count}곳` +
+      (s.maxAngle != null ? ` · 최대 경사 ${s.maxAngle}°` : "") +
+      (s.designated ? ` · 지정 위험지역 ${s.designated}곳` : "");
+    const items = s.items.map((i) => `<li>
+        <b>${esc(i.name)}</b> · 약 ${formatDistance(i.distance)}<br>
+        <span class="meta">${esc(i.kind)}${i.angle != null ? ` · 경사 ${i.angle}°` : ""}${i.height != null ? ` · 높이 ${i.height}m` : ""}${i.rating ? ` · 등급 ${esc(i.rating)}` : ""}${i.designated ? " · 지정 위험지역" : ""}</span>
+      </li>`).join("");
+    return `<details class="slope"><summary>${esc(head)}</summary><ul>${items}</ul>
+      <p class="note">자전거길 오르막이 아니라 무너질 위험이 있는 비탈면(옹벽·석축 등)입니다. 위치는 약 100m 오차가 있어요.${s.count > 5 ? " 가까운 5곳만 보여요." : ""}</p></details>`;
+  }
+
+  // 구를 고르면 그 구를 지나는 자전거도로 목록 (좌표가 없는 자료라 목록으로만)
+  function renderRoads(gu, roads) {
+    const box = $("roads");
+    if (!roads || !roads.length) { box.innerHTML = ""; return; }
+    const total = roads.reduce((a, r) => a + (r.lengthKm || 0), 0);
+    box.innerHTML = `<details class="roads"><summary>🚲 ${esc(gu)} 자전거도로 ${roads.length}개 구간 · 총 ${total.toFixed(1)}km</summary>
+      <ul>${roads.map((r) => `<li>
+        <span class="rname">${esc(r.name)}</span> <span class="meta">${esc(r.type)}</span>
+        <div class="meta">${r.lengthKm != null ? `${r.lengthKm}km` : ""}${r.widthM ? ` · 너비 ${r.widthM}m` : ""}</div>
+        <div class="meta">${esc(shortAddr(r.from))} → ${esc(shortAddr(r.to))}</div>
+      </li>`).join("")}</ul>
+      <p class="note">자료에 좌표가 없어 지도·거리 계산은 할 수 없어요. 기점·종점 주소로 표시합니다.</p></details>`;
+  }
+  const shortAddr = (a) => String(a || "").replace(/^(경상남도|경남)\s*창원시\s*/, "");
+
   function render(places) {
+    $("roads").innerHTML = "";
     list.innerHTML = places.map((p) => {
       const lines = [];
       if (p.terminalNo) lines.push(`터미널 ${p.terminalNo}번`);
@@ -130,6 +173,7 @@
         <div class="meta">${esc(p.address)}</div>
         <div class="meta">${lines.map(esc).join(" · ")}</div>
         ${status}
+        ${slopeBlock(p.slopes)}
         <a class="map" href="${mapLink(p)}" target="_blank" rel="noopener">지도에서 보기 ›</a>
       </li>`;
     }).join("");
@@ -186,6 +230,7 @@
       const storage = data.places.filter((p) => p.racks != null).length;
       setMessage(`${gu} · ${data.places.length}곳 (대여소 ${rental} · 보관소 ${storage}, 겹치는 곳 포함)`);
       render(data.places);
+      renderRoads(gu, data.roads);
     } catch (e) {
       setMessage(e.message, true);
     }
@@ -198,9 +243,10 @@
       guSelect.insertAdjacentHTML("beforeend",
         data.gus.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join(""));
       $("sources").innerHTML = data.sources.map((s) =>
-        `<p>${esc(s.label)} ${s.count}곳 · 기준일 ${esc(s.dataDate || "확인 필요")} · 출처: ${esc(s.name)}</p>`
+        `<p>${esc(s.label)} ${s.count}${s.key === "roads" ? "개" : "곳"} · 기준일 ${esc(s.dataDate || "확인 필요")} · 출처: ${esc(s.name)}</p>`
       ).join("") +
-        "<p>누비자 터미널과 50m 안에 있는 보관소는 한 곳으로 합쳐 보여 줍니다. 실시간 대여 가능 대수와 보관소 빈자리는 포함되지 않았습니다.</p>";
+        "<p>누비자 터미널과 50m 안에 있는 보관소는 한 곳으로 합쳐 보여 줍니다. 실시간 대여 가능 대수와 보관소 빈자리는 포함되지 않았습니다.</p>" +
+        "<p>급경사지는 자전거길 오르막이 아니라 붕괴 위험 비탈면 자료입니다.</p>";
     } catch (e) {
       $("sources").innerHTML = `<p>${esc(e.message)}</p>`;
     }

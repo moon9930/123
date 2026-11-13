@@ -11,6 +11,7 @@
 ## 프로젝트
 - 창원 자전거 대여소·보관소 찾기: 내 위치(또는 구 선택) → 가까운 대여소·보관소 거리순 목록
 - 데이터 477곳: 누비자 터미널 454 (그중 261곳은 50m 안 보관소를 합침) + 보관소만 22 + 기타 대여소 1
+- 4회차 추가: 급경사지 214곳(bike_slopes, 장소 300m 안 주의 표시) · 자전거도로 116구간(bike_roads, 좌표 없어 구별 목록만). 둘 다 없어도 핵심 기능은 돌아가게 api에서 선택 데이터로 처리
 - 데이터: data/stations_utf8.csv (원본 3개 · 합친 규칙은 data/README.md, 원본 수정 금지)
 - 구조: index.html · api/places.js · lib/distance.js · lib/rental-status.js · supabase/schema.sql · data/
 - 따로 만든 게임(PRD 밖, 건드리지 않음): tower-defense.html · lotto.html · api/commentary.js
