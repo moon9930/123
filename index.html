@@ -64,6 +64,18 @@
   .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 2px solid #fff;
     box-shadow: 0 0 0 1px rgba(0,0,0,.25); vertical-align: -1px; margin-right: 4px; }
   .tri { color: #c62828; margin-right: 4px; }
+  /* 지도 전체 화면 */
+  .fs-btn { font: 700 14px/1 "Malgun Gothic", system-ui, sans-serif; background: #fff; color: #15241d;
+    border: 2px solid rgba(0,0,0,.2); border-radius: 6px; padding: 8px 10px; cursor: pointer; min-height: 0; }
+  .fs-btn:focus-visible { outline: 3px solid #13795b; outline-offset: 2px; }
+  #mapWrap.full { position: fixed; inset: 0; z-index: 2000; margin: 0; background: var(--bg);
+    display: flex; flex-direction: column; }
+  #mapWrap.full #map { flex: 1; height: auto; border: 0; border-radius: 0; }
+  #mapWrap.full .legend { margin: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--line); }
+  body.no-scroll { overflow: hidden; }
+  #fsRoute { display: none; width: 100%; font-weight: 700; color: var(--accent); }
+  #mapWrap.full #fsRoute:not(:empty) { display: block; }
   .line-swatch { display: inline-block; width: 18px; height: 5px; border-radius: 3px; background: #6a3fd1;
     vertical-align: 3px; margin-right: 4px; }
   .slope-icon { color: #c62828; font-size: 16px; line-height: 16px; text-align: center;
@@ -125,6 +137,7 @@
       <span><span class="dot" style="background:var(--accent)"></span>내 위치</span>
       <span><span class="tri">▲</span>급경사지</span>
       <span><span class="line-swatch"></span>자전거 경로</span>
+      <span id="fsRoute"></span>
     </div>
   </div>
   <div id="routeBox" hidden aria-live="polite"></div>
@@ -212,9 +225,60 @@
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       }).addTo(map);
       layer = L.layerGroup().addTo(map);
+      addFullscreenButton();
     }
     return map;
   }
+
+  // ── 지도 전체 화면: 버튼 · 휴대폰 뒤로가기 · Esc로 닫기 ──
+  let fsBtn = null;
+  const isFull = () => $("mapWrap").classList.contains("full");
+
+  function addFullscreenButton() {
+    const Ctl = L.Control.extend({
+      options: { position: "topright" },
+      onAdd() {
+        fsBtn = L.DomUtil.create("button", "fs-btn");
+        fsBtn.type = "button";
+        L.DomEvent.disableClickPropagation(fsBtn);
+        L.DomEvent.on(fsBtn, "click", () => (isFull() ? closeFull() : openFull()));
+        updateFsBtn();
+        return fsBtn;
+      },
+    });
+    new Ctl().addTo(map);
+  }
+
+  function updateFsBtn() {
+    if (!fsBtn) return;
+    fsBtn.textContent = isFull() ? "✕ 닫기" : "⛶ 전체 화면";
+    fsBtn.setAttribute("aria-label", isFull() ? "지도 전체 화면 닫기" : "지도 전체 화면으로 보기");
+  }
+
+  function setFull(on) {
+    const center = map.getCenter(), zoom = map.getZoom();
+    $("mapWrap").classList.toggle("full", on);
+    document.body.classList.toggle("no-scroll", on);
+    updateFsBtn();
+    // 크기가 바뀐 뒤 지도에 알려 주고, 보던 곳을 그대로 유지한다
+    requestAnimationFrame(() => { map.invalidateSize(); map.setView(center, zoom, { animate: false }); });
+    if (!on) $("mapWrap").scrollIntoView({ block: "start" });
+  }
+
+  function openFull() {
+    if (isFull()) return;
+    history.pushState({ mapFull: true }, ""); // 휴대폰 "뒤로" 버튼으로 닫히게
+    setFull(true);
+  }
+
+  function closeFull() {
+    if (!isFull()) return;
+    if (history.state?.mapFull) history.back(); // popstate에서 닫힌다
+    else setFull(false);
+  }
+
+  window.addEventListener("popstate", () => { if (isFull()) setFull(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFull(); });
 
   function popupHtml(p) {
     const kind = [p.type === "rental" ? (p.service === "nubija" ? "누비자 대여소" : "대여소") : "",
@@ -291,6 +355,7 @@
     if (routeLayer) routeLayer.clearLayers();
     $("routeBox").hidden = true;
     $("routeBox").innerHTML = "";
+    $("fsRoute").textContent = "";
   }
 
   async function startRoute(id, btn) {
@@ -300,7 +365,8 @@
     if (btn) btn.disabled = true;
     box.hidden = false;
     box.innerHTML = `<p>🚲 <b>${esc(p.name)}</b>까지 자전거 경로를 찾는 중…</p>`;
-    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    $("fsRoute").textContent = `🚲 ${p.name}까지 경로를 찾는 중…`;
+    if (!isFull()) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
     try {
       const me = await getMyPos();
       const q = `from=${me[0].toFixed(5)},${me[1].toFixed(5)}&to=${p.lat},${p.lng}`;
@@ -308,9 +374,15 @@
       drawRoute(r, me, p);
       box.innerHTML = routeSummary(r, p);
       box.querySelector(".close").onclick = clearRoute;
-      $("mapWrap").scrollIntoView({ behavior: "smooth", block: "start" });
+      // 전체 화면에서는 아래 요약 상자가 가려지므로 지도 아래 줄에 짧게 보여 준다
+      const share = r.distance ? Math.round((r.onBikeRoadM / r.distance) * 100) : 0;
+      $("fsRoute").textContent = `🚲 ${p.name}까지 ${(r.distance / 1000).toFixed(1)}km · 약 ${fmtMin(r.duration)}` +
+        (r.bikeRoads.length ? ` · 자전거도로 ${share}%` : "") +
+        (r.slopes?.count ? ` · ⚠️ 급경사지 ${r.slopes.count}곳` : "");
+      if (!isFull()) $("mapWrap").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
       box.innerHTML = `<p class="warnline">${esc(e.message)}</p>`;
+      $("fsRoute").textContent = `⚠️ ${e.message}`;
     } finally {
       if (btn) btn.disabled = false;
     }
